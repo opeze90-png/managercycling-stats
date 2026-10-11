@@ -1,0 +1,9 @@
+{
+  "current": { "year": 2026, "res": "455-resultados", "ins": "451-inscripciones" },
+  "seasons": [
+    { "year": 2025, "res": "440-resultados", "ins": "439-inscripciones" },
+    { "year": 2024, "res": "423-resultados", "ins": "422-inscripciones" },
+    { "year": 2023, "res": "409-resultados", "ins": "408-inscripciones" },
+    { "year": 2022, "res": "360-resultados", "ins": "359-inscripciones" }
+  ]
+}
