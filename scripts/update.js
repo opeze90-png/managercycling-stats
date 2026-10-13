@@ -1,11 +1,18 @@
 #!/usr/bin/env node
-// Actualiza data/ con los temas del foro Managercycling.
-//  node scripts/update.js          incremental: temas nuevos o con respuestas nuevas
-//  node scripts/update.js --full   vuelve a leer toda la temporada actual
-// Si falta alguna temporada de scripts/config.json en data/, la descarga entera
-// (así el primer arranque en GitHub crea todos los datos). Sin dependencias: Node 18+.
+// Actualiza los datos de la web a partir del foro Managercycling.
+//
+// 1. Guarda cada tema del foro tal cual en raw/<año>/<tipo>-<id>.json.gz
+//    (solo descarga los temas nuevos o con respuestas nuevas).
+// 2. Reconstruye data/ entero desde raw/ con el analizador actual, así
+//    cualquier mejora del analizador se aplica también a temporadas pasadas.
+//
+//  node scripts/update.js            incremental
+//  node scripts/update.js --full     vuelve a descargar la temporada actual
+//  node scripts/update.js --rebuild  solo reconstruye data/ desde raw/
+// Sin dependencias: Node 18+.
 const fs = require('fs');
 const path = require('path');
+const zlib = require('zlib');
 const here = __dirname;
 require(path.join(here, 'mcparse.js'));
 require(path.join(here, 'build.js'));
@@ -13,89 +20,84 @@ require(path.join(here, 'forum.js'));
 
 const ROOT = path.resolve(here, '..');
 const DATA = path.join(ROOT, 'data');
+const RAW = path.join(ROOT, 'raw');
 const cfg = JSON.parse(fs.readFileSync(path.join(here, 'config.json'), 'utf8'));
 const FULL = process.argv.includes('--full');
-const MAX = +(process.env.MAX_TOPICS || 400);
+const ONLY_REBUILD = process.argv.includes('--rebuild');
 const DEADLINE = Date.now() + (+(process.env.MAX_MINUTES || 300)) * 60000;
 
-function load() {
-  const f = path.join(DATA, 'core.json');
-  if (!fs.existsSync(f)) return { v: 2, seasons: [], done: [], teams: [], riders: [], races: [], ins: [] };
-  const core = JSON.parse(fs.readFileSync(f, 'utf8'));
-  const data = { ...core, races: [], ins: [] };
-  for (const s of core.seasons) {
-    const p = path.join(DATA, `s${s}.json`);
-    if (!fs.existsSync(p)) continue;
-    const part = JSON.parse(fs.readFileSync(p, 'utf8'));
-    data.races.push(...part.races); data.ins.push(...part.ins);
-  }
-  return data;
+const idxFile = path.join(RAW, 'index.json');
+const index = fs.existsSync(idxFile) ? JSON.parse(fs.readFileSync(idxFile, 'utf8')) : { topics: {}, done: [] };
+const saveIndex = () => { fs.mkdirSync(RAW, { recursive: true }); fs.writeFileSync(idxFile, JSON.stringify(index, null, 0)); };
+const rawPath = (y, kind, id) => path.join(RAW, String(y), `${kind}-${id}.json.gz`);
+
+function storeTopic(y, x) {
+  const p = rawPath(y, x.t.kind, x.id);
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, zlib.gzipSync(JSON.stringify(x), { level: 9 }));
+  index.topics[x.t.kind + '-' + x.id] = { y, r: x.t.replies, t: x.t.title };
 }
-function save(data) {
+
+async function download(F, y, kind, topics) {
+  let n = 0;
+  for (const t of topics) {
+    if (Date.now() > DEADLINE) { console.log('  Tiempo agotado, se seguirá en la próxima ejecución.'); return false; }
+    try { storeTopic(y, await F.topic(t, kind)); n++; if (n % 25 === 0) { saveIndex(); process.stdout.write(`${n} `); } }
+    catch (e) { console.log(`\n  Error en ${t.title}: ${e.message}`); }
+  }
+  saveIndex();
+  if (n) console.log(`  ${kind}: ${n} temas guardados`);
+  return true;
+}
+
+function rebuild() {
+  const comp = MCBuild.Compactor();
+  const years = fs.existsSync(RAW) ? fs.readdirSync(RAW).filter(d => /^\d{4}$/.test(d)).sort() : [];
+  let n = 0;
+  for (const y of years) {
+    const files = fs.readdirSync(path.join(RAW, y)).filter(f => f.endsWith('.json.gz')).sort((a, b) => (+a.match(/\d+/)[0]) - (+b.match(/\d+/)[0]));
+    const topics = files.map(f => JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(RAW, y, f))).toString('utf8')));
+    MCBuild.ingest(comp, topics, { onError: (x, e) => console.log('No se pudo leer', x.t.title, e.message) });
+    n += topics.length;
+  }
+  const data = comp.finish({ generated: new Date().toISOString() });
   fs.mkdirSync(DATA, { recursive: true });
-  const core = { v: data.v, generated: data.generated, seasons: data.seasons, done: data.done || [], teams: data.teams, riders: data.riders };
+  for (const f of fs.readdirSync(DATA)) if (/^s\d{4}\.json$/.test(f) && !data.seasons.includes(+f.slice(1, 5))) fs.unlinkSync(path.join(DATA, f));
   for (const s of data.seasons) {
     const part = { races: data.races.filter(r => r.s === s), ins: data.ins.filter(i => i.s === s) };
     fs.writeFileSync(path.join(DATA, `s${s}.json`), JSON.stringify(part));
   }
+  const core = { v: data.v, generated: data.generated, seasons: data.seasons, teams: data.teams, riders: data.riders };
   fs.writeFileSync(path.join(DATA, 'core.json'), JSON.stringify(core));
-}
-function ingest(data, raw) {
-  const comp = MCBuild.Compactor(data);
-  MCBuild.ingest(comp, raw, { onError: (x, e) => console.log('No se pudo leer', x.t.title, e.message) });
-  const done = data.done || [];
-  const out = comp.finish({ generated: new Date().toISOString() });
-  out.done = done;
-  return out;
+  console.log(`Datos reconstruidos desde ${n} temas: ${data.races.length} carreras, ${data.ins.length} inscripciones, ${data.riders.length} corredores.`);
 }
 
 (async () => {
-  let data = load();
-  const F = MCForum.Forum({ DOMParser: null, gap: +(process.env.GAP_MS || 900) });
-
-  // 1) Temporadas que aún no están en data/ (primer arranque o temporada añadida al config)
-  // seasons already published before this mechanism existed count as done
-  if (!data.done || !data.done.length) data.done = data.seasons.filter(y => y !== cfg.current.year && data.races.some(r => r.s === y));
-  const have = new Set(data.done);
-  for (const s of (cfg.seasons || []).slice().sort((a, b) => b.year - a.year)) {
-    if (have.has(s.year) || s.year === cfg.current.year) continue;
-    if (Date.now() > DEADLINE) break;
-    console.log(`Temporada ${s.year}: descargando todo…`);
-    const raw = [];
-    for (const [kind, fid] of [['res', s.res], ['ins', s.ins]]) {
-      const topics = (await F.forumTopics(fid)).filter(t => /^\d/.test(t.title));
-      console.log(`  ${kind}: ${topics.length} temas`);
-      for (const t of topics) { try { raw.push(await F.topic(t, kind)); } catch (e) { console.log(`  Error en ${t.title}: ${e.message}`); } }
+  if (!ONLY_REBUILD) {
+    const F = MCForum.Forum({ DOMParser: null, gap: +(process.env.GAP_MS || 900) });
+    const seasons = [cfg.current, ...(cfg.seasons || [])];
+    for (const s of seasons) {
+      const isCurrent = s.year === cfg.current.year;
+      if (!isCurrent && index.done.includes(s.year)) continue;
+      console.log(`Temporada ${s.year}${isCurrent ? ' (actual)' : ''}`);
+      let complete = true;
+      for (const [kind, fid] of [['res', s.res], ['ins', s.ins]]) {
+        const known = t => index.topics[kind + '-' + t.id];
+        const fresh = t => known(t) && known(t).r === t.replies;
+        const stopAt = isCurrent && !FULL ? page => page.length > 0 && page.every(t => !/^\d/.test(t.title) || fresh(t)) : null;
+        const topics = (await F.forumTopics(fid, { stopAt })).filter(t => /^\d/.test(t.title));
+        const todo = topics.filter(t => FULL || !fresh(t));
+        console.log(`  ${kind}: ${topics.length} temas en el foro, ${todo.length} por descargar`);
+        if (!(await download(F, s.year, kind, todo))) { complete = false; break; }
+      }
+      if (!isCurrent && complete) { index.done.push(s.year); saveIndex(); }
+      if (Date.now() > DEADLINE) break;
     }
-    data = ingest(data, raw);
-    data.done = [...new Set([...(data.done || []), s.year])].sort();
-    save(data);
-    console.log(`  Guardada: ${data.races.length} carreras en total.`);
   }
-
-  // 2) Temporada actual: temas nuevos o modificados
-  const known = new Map();
-  data.races.forEach(r => known.set('res' + r.id, r.rp));
-  data.ins.forEach(i => known.set('ins' + i.id, i.rp));
-  const firstRun = !data.races.some(r => r.s === cfg.current.year);
-  const changed = [];
-  for (const [kind, fid] of [['res', cfg.current.res], ['ins', cfg.current.ins]]) {
-    const stopAt = (FULL || firstRun) ? null : page => page.length > 0 && page.every(t => !/^\d/.test(t.title) || known.get(kind + t.id) === t.replies);
-    const topics = await F.forumTopics(fid, { stopAt });
-    for (const t of topics) if (/^\d/.test(t.title) && (FULL || firstRun || known.get(kind + t.id) !== t.replies)) changed.push({ t, kind });
-    console.log(`${kind}: ${topics.length} temas revisados`);
+  const missing = (cfg.seasons || []).map(s => s.year).filter(y => !index.done.includes(y));
+  if (missing.length && !ONLY_REBUILD && fs.existsSync(path.join(DATA, 'core.json'))) {
+    console.log(`Aún faltan temas de ${missing.join(', ')}: se mantienen los datos actuales hasta tenerlo todo.`);
+    return;
   }
-  if (!changed.length) { console.log('Sin cambios en el foro.'); if (!fs.existsSync(path.join(DATA, 'core.json'))) save(data); return; }
-  const todo = firstRun ? changed : changed.slice(0, MAX);
-  console.log(`Descargando ${todo.length} temas…`);
-  const raw = [];
-  for (const { t, kind } of todo) {
-    if (Date.now() > DEADLINE) break;
-    try { raw.push(await F.topic(t, kind)); process.stdout.write('.'); }
-    catch (e) { console.log(`\nError en ${t.title}: ${e.message}`); }
-  }
-  console.log('');
-  data = ingest(data, raw);
-  save(data);
-  console.log(`Guardado: ${data.races.length} carreras, ${data.ins.length} inscripciones, ${data.riders.length} corredores.`);
+  rebuild();
 })().catch(e => { console.error(e); process.exit(1); });
