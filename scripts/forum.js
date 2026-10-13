@@ -29,6 +29,13 @@
     }
     return out;
   }
+  // pictures in a post (race profiles, maps…), without smileys, icons or avatars
+  const isPicture = src => /^https?:\/\//i.test(src) && !/smil|emoji|icon|avatar|rank|\/images\/|button|forumactif\.com\/i\/|illiweb|\.svg(\?|$)/i.test(src);
+  function imagesText(html) {
+    const out = [];
+    for (const m of html.matchAll(/<img\b[^>]*?\bsrc="([^"]+)"/gi)) { const src = decode(m[1]); if (isPicture(src) && !out.includes(src)) out.push(src); }
+    return out.slice(0, 6);
+  }
   function pageCountText(html) { let max = 1; for (const m of html.matchAll(/href="\/?f\d+p(\d+)-/g)) max = Math.max(max, Math.floor(+m[1] / TOPICS_PER_PAGE) + 1); return max; }
   function readPostsText(html) {
     const parts = html.split(/<tr class="post\b/i).slice(1);
@@ -48,7 +55,7 @@
       const sig = body.search(/<div class="signature_div"/i);
       const end = body.search(/<\/td>\s*<\/tr>\s*<\/tbody>\s*<\/table>/i);
       body = body.slice(0, sig >= 0 ? sig : (end >= 0 ? end : body.length));
-      out.push({ a: author, tm: team, d: date, id: idm ? +idm[1] : null, L: htmlLines(body) });
+      out.push({ a: author, tm: team, d: date, id: idm ? +idm[1] : null, L: htmlLines(body), im: imagesText(body) });
     }
     return out;
   }
@@ -140,7 +147,8 @@
         const prof = norm(profEl && profEl.childNodes[0] ? profEl.childNodes[0].textContent : '');
         const team = (prof.match(/^M[áa]nager del?\s+(.+)$/i) || [])[1] || null;
         const date = norm((right.querySelector('.postdetails') || {}).textContent || '').replace(/^.*?(?=(Lun|Mar|Mi[ée]r?|Jue|Vie|S[áa]b|Dom|Hoy|Ayer)\b)/, '');
-        return { a: author, tm: team, d: date, id: +(tr.id || '').replace(/\D/g, '') || null, L: bodyLines(body) };
+        const im = [...new Set([...body.querySelectorAll('img')].map(i => i.getAttribute('src') || '').filter(isPicture))].slice(0, 6);
+        return { a: author, tm: team, d: date, id: +(tr.id || '').replace(/\D/g, '') || null, L: bodyLines(body), im };
       }).filter(Boolean);
     }
     async function topic(t, kind) {
@@ -150,9 +158,16 @@
         const slug = p === 0 ? t.slug : t.slug.replace(/^t(\d+)-/, `t$1p${p * POSTS_PER_PAGE}-`);
         posts = posts.concat(readPosts(await getDoc('/' + slug)));
       }
-      return { id: t.id, t: { ...t, kind }, posts };
+      // pictures: race profile in the first post; in results also each stage post's profile
+      posts.forEach((p, i) => { if ((i > 0 && kind !== 'res') || !p.im || !p.im.length) delete p.im; else p.im = p.im.slice(0, 3); });
+      return { id: t.id, t: { ...t, kind }, posts, iv: 1 };
     }
-    return { getDoc, forumTopics, topic, readPosts, listTopics, stop() { stopped = true; } };
+    // first post's pictures only (one request)
+    async function firstImages(t) {
+      const posts = readPosts(await getDoc('/' + t.slug));
+      return (posts[0] && posts[0].im) || [];
+    }
+    return { getDoc, forumTopics, topic, firstImages, readPosts, listTopics, stop() { stopped = true; } };
   }
 
   G.MCForum = { Forum, BASE, readPostsText, listTopicsText };

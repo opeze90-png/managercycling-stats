@@ -35,7 +35,7 @@ function storeTopic(y, x) {
   const p = rawPath(y, x.t.kind, x.id);
   fs.mkdirSync(path.dirname(p), { recursive: true });
   fs.writeFileSync(p, zlib.gzipSync(JSON.stringify(x), { level: 9 }));
-  index.topics[x.t.kind + '-' + x.id] = { y, r: x.t.replies, t: x.t.title };
+  index.topics[x.t.kind + '-' + x.id] = { y, r: x.t.replies, t: x.t.title, im: 1 };
 }
 
 async function download(F, y, kind, topics) {
@@ -93,6 +93,46 @@ function rebuild() {
       if (!isCurrent && complete) { index.done.push(s.year); saveIndex(); }
       if (Date.now() > DEADLINE) break;
     }
+  }
+  // pictures of the first post of each inscription (race profile), for topics saved before we kept them
+  if (!ONLY_REBUILD) {
+    const F = MCForum.Forum({ DOMParser: null, gap: +(process.env.GAP_MS || 900) });
+    const todo = Object.entries(index.topics).filter(([k, v]) => k.startsWith('ins-') && !v.im).sort((a, b) => b[1].y - a[1].y);
+    if (todo.length) console.log(`Fotos de perfil: ${todo.length} inscripciones por revisar`);
+    let n = 0;
+    for (const [k, v] of todo) {
+      if (Date.now() > DEADLINE) break;
+      const p = rawPath(v.y, 'ins', k.slice(4));
+      if (!fs.existsSync(p)) { v.im = 1; continue; }
+      try {
+        const x = JSON.parse(zlib.gunzipSync(fs.readFileSync(p)).toString('utf8'));
+        const im = await F.firstImages(x.t);
+        if (x.posts[0]) { if (im.length) x.posts[0].im = im; else delete x.posts[0].im; }
+        fs.writeFileSync(p, zlib.gzipSync(JSON.stringify(x), { level: 9 }));
+        v.im = 1; n++;
+        if (n % 50 === 0) { saveIndex(); process.stdout.write(`${n} `); }
+      } catch (e) { console.log(`\n  Error en ${v.t}: ${e.message}`); }
+    }
+    saveIndex();
+    if (n) console.log(`  ${n} inscripciones revisadas`);
+  }
+  // Topics saved before pictures were read: download them again, newest first, while time remains.
+  if (!ONLY_REBUILD) {
+    const F = MCForum.Forum({ DOMParser: null, gap: +(process.env.GAP_MS || 900) });
+    const years = fs.existsSync(RAW) ? fs.readdirSync(RAW).filter(d => /^\d{4}$/.test(d)).sort().reverse() : [];
+    let n = 0;
+    outer: for (const y of years) {
+      const files = fs.readdirSync(path.join(RAW, y)).filter(f => f.endsWith('.json.gz')).sort((a, b) => (+b.match(/\d+/)[0]) - (+a.match(/\d+/)[0]));
+      for (const f of files) {
+        if (Date.now() > DEADLINE) break outer;
+        const x = JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(RAW, y, f))).toString('utf8'));
+        if (x.iv) continue;
+        try { storeTopic(+y, await F.topic(x.t, x.t.kind)); n++; if (n % 25 === 0) { saveIndex(); process.stdout.write(`${n} `); } }
+        catch (e) { console.log(`\n  Error en ${x.t.title}: ${e.message}`); }
+      }
+    }
+    saveIndex();
+    if (n) console.log(`\nImágenes: ${n} temas actualizados`);
   }
   const missing = (cfg.seasons || []).map(s => s.year).filter(y => !index.done.includes(y));
   if (missing.length && !ONLY_REBUILD && fs.existsSync(path.join(DATA, 'core.json'))) {

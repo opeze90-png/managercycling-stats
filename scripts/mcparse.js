@@ -14,7 +14,7 @@
     let note = null;
     const nm = t.match(/^(.*?)\s*\(([^)]*)\)\s*$/);
     if (nm && /\d{4}/.test(nm[1])) { t = nm[1]; note = nm[2]; }
-    const m = t.match(/^(\d{1,2})[\/.](\d{1,2})[\/.](\d{4})(?:\s*[-–]?\s*(\d{1,2})[\/.](\d{1,2})[\/.](\d{4}))?\s+(.+)$/);
+    const m = t.match(/^(\d{1,2})[\/.](\d{1,2})[\/.](\d{4})\d?(?:\s*[-–]?\s*(\d{1,2})[\/.](\d{1,2})[\/.](\d{4})\d?)?\s+(.+)$/);
     if (!m) return { name: t, start: null, end: null, country: null, cls: null, note };
     const d = (a, b, c) => `${c}-${String(b).padStart(2, '0')}-${String(a).padStart(2, '0')}`;
     let parts = m[7].split(' '), cls = null, country = null;
@@ -32,7 +32,7 @@
 
   // ---------- headers ----------
   const SEC = [
-    ['TOTR', /^total(es)? (ciclistas|corredores)$/],
+    ['TOTR', /^(total(es)? (ciclistas|corredores)|(total |puntos )?por (ciclista|corredor)(es|s)?|ciclistas|corredores)$/],
     ['TOT', /^(total|totales|puntos totales|total equipos|puntos equipos|puntos por equipos?|presupuesto)$/],
     ['GC', /^(general|resto de general|resto general|clasificacion general|general final|rojo|maillot rojo|rosa|maglia rosa|jaune|maillot jaune|amarillo|maillot amarillo|lider|gc)$/],
     ['PTS', /^(puntos|regularidad|clasificacion por puntos|ciclamino|maglia ciclamino|vert|maillot vert|verde|maillot verde|points)$/],
@@ -123,7 +123,7 @@
   // Learn team names from tabbed rows (unambiguous) across many topics.
   function learnTeams(topics, idx) {
     for (const x of topics) for (const p of x.posts) for (const l of p.L) {
-      if (l.indexOf('\t') < 0) continue;
+      if (l.indexOf('\t') < 0 || /^\s*(spoiler:\s*)?l[ií]der\b/i.test(l)) continue;
       const c = l.split('\t').map(norm).filter(Boolean);
       const okTeam = x => x && /[A-Za-z]{2}/.test(x) && !x.split(' ').every(isValTok) && !/^[+(]/.test(x);
       if (c.length >= 4 && /^\d+$/.test(c[0]) && okTeam(c[2]) && okTeam(c[1])) idx.add(c[2]);
@@ -141,6 +141,9 @@
     // "Etapa 19 1 Tobias Halland Johannessen Lidl-Trek 480" → header + row
     const g = l.match(/^((?:etapa|stage)\s*\d+\s*(?:\.?\s*[ab](?![a-z]))?|pr[oó]logo)[\t ]+(\d+[.º]?[\t ]+\D.*)$/i);
     if (g) return [norm(g[1]), g[2]];
+    // "Jóvenes 1 Lennert Van Eetvelt (J) Uno-X Mobility 60" → header + first row
+    const h = l.match(/^([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ .]{2,30}?)[\t ]+(1[.º]?[\t ]+\D.*)$/);
+    if (h && (sectionOf(h[1]) || stageCtx(h[1]))) return [norm(h[1]), h[2]];
     const m = l.match(/^([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9() ]{2,30}?):+\s*(\d+[\t ].*)$/);
     if (m) return [m[1], m[2]];
     const t = l.match(/^([^\t\d][^\t]{1,40}?)\t+(\d+\t.*)$/);
@@ -199,7 +202,7 @@
       }
       if (groups.length === 2 && groups[0] === 't' && groups[1] === 'n') { pts0 = toNum(toks.pop()); vals = toks.join(' '); }
     }
-    if (rider && /^[a-zà-ÿ]/.test(norm(rider)) && !/^(de|del|van|von|da|di|le|la)\s/i.test(norm(rider))) return null; // narrative text, not a rider
+    if (rider && /^[a-zà-ÿ]/.test(norm(rider)) && (!/^(de|del|van|von|da|di|le|la)\s/i.test(norm(rider)) || !/(^|\s)[A-ZÀ-Ý]/.test(norm(rider)))) return null; // narrative text, not a rider
     return { p: pos, r: rider ? norm(rider) : null, t: team ? (teams.get(team) || norm(team)) : null, v: vals.slice(0, 40), one, timey, pts0 };
   }
 
@@ -210,12 +213,23 @@
       if (!p.L || !p.L.length || /contenido patrocinado/i.test(p.a || '')) return;
       let ctx = null, ctxInfo = null, sec = null, cur = null, lastPos = null;
       const start = (s) => { cur = { post: pi, ctx, ctxInfo, sec: s, rows: [] }; blocks.push(cur); lastPos = null; };
-      for (const raw of p.L) {
+      // two rows glued on one line: "4  Guillaume Martin  Quick-Step  84  5  Tony Gallopin  W52  74"
+      const lines = [];
+      for (const l of p.L) {
+        let rest = l, m;
+        while ((m = rest.match(/^(\s*\d+\t+[^\t\d][^\t]*\t+[^\t\d][^\t]*\t+[\d.,]+)\t+(\d+\t+[^\t\d][^\t]*\t+[^\t\d][^\t]*\t+[\d.,]+.*)$/))) { lines.push(m[1]); rest = m[2]; }
+        lines.push(rest);
+      }
+      for (const raw of lines) {
         const lr = raw.replace(/^\s*spoiler:\s*/i, '');
         if (/^\s*l[íi]der\b/i.test(lr)) {
           // "Líder Remco Evenepoel (J)  Team Flanders - Baloise  96": puntos MC por ir líder tras la etapa
           const rest = lr.replace(/^\s*l[íi]der\s*:?\s*/i, '');
           const r = /\d\s*$/.test(rest) ? parseRow(rest, 'R', teams) : null;
+          if (!r && ctx != null) { // "Líder Maximilian Schachmann 48" (sin equipo)
+            const m = norm(rest).match(/^([A-ZÀ-Ý][^\d\t]{3,60}?)\s+(\d[\d.,]*)$/);
+            if (m) { const sp = teams.splitEnd(m[1]); leaderPts.set(ctx, { p: ctx, r: sp && sp[0] ? sp[0] : m[1], t: sp ? sp[1] : null, v: m[2], one: toNum(m[2]) }); continue; }
+          }
           if (r && r.one == null && /^[\d. ]+$/.test(r.v || '')) { const t = r.v.split(' ').pop(); if (NUM_TOK.test(t)) { r.one = toNum(t); r.v = t; } }
           if (r && r.r && r.one != null && ctx != null) leaderPts.set(ctx, r);
           continue;
@@ -257,19 +271,33 @@
           if (!r) { if (log) log('row?', l); continue; }
           if (!cur || cur.sec !== s) { sec = s; start(s); }
           // a classification list that restarts at 1 without a header is another classification
-          else if (r.p === 1 && lastPos >= 3 && ['GC', 'PTS', 'KOM', 'YOU', 'TEAM'].includes(s)) { sec = s = 'UNK'; start(s); }
+          else if (r.p === 1 && lastPos >= 3 && ['GC', 'PTS', 'KOM', 'YOU', 'TEAM', 'UNK'].includes(s)) { sec = s = 'UNK'; start(s); }
           // a results list followed by a headerless young riders' list: "1 Jasper Philipsen (J) ..."
           else if (r.p === 1 && lastPos >= 3 && s === 'R' && r.r && /\(J\)/i.test(r.r)) { sec = s = 'YOU'; start(s); }
+          // another list without header after the results (general, points...): keep it apart
+          else if (r.p === 1 && lastPos >= 3 && s === 'R') { if (r.r) { sec = s = 'UNK'; start(s); } else start(s); }
           if (r.p == null) { r.np = 1; r.p = lastPos || 1; } else lastPos = r.p;
           cur.rows.push(r);
         }
       }
     });
-    const out = blocks.filter(b => b.rows.length);
+    let out = blocks.filter(b => b.rows.length);
+    // "Resto de general": a list split in two that goes on where the previous one stopped
+    out = out.filter((b, i) => {
+      const prev = out[i - 1];
+      if (i > 0 && prev.post === b.post && prev.sec === b.sec && prev.ctx === b.ctx && b.rows[0].p > 1 && b.rows[0].p === prev.rows[prev.rows.length - 1].p + 1) { prev.rows.push(...b.rows); b.rows = prev.rows; out[i] = prev; return false; }
+      return true;
+    });
     out.leaderPts = leaderPts;
+    // "Equipos" followed by "Team<TAB>1.748" lines without positions: the team totals of the race
+    out.forEach(b => { if (b.sec === 'TEAM' && b.rows.length >= 6 && b.rows.every(r => !r.r && r.t && r.np && r.one != null) && (b.rows.length >= 12 || out.filter(o => o.post === b.post).length === 1)) b.sec = 'TOT'; });
     out.forEach((b, i) => { if (b.sec === 'NP') b.sec = i > 0 && out[i - 1].post === b.post && b.rows.every(r => /\(J\)/i.test(r.r || '')) ? 'YOU' : 'R'; });
     out.forEach(b => {
       if (b.sec === 'UNK' && b.rows.length && b.rows.every(r => r.r && /\(J\)/i.test(r.r))) { b.sec = 'YOU'; return; }
+      if (b.sec === 'UNK' && b.rows.filter(r => r.timey).length > b.rows.length / 2) {
+        const have = new Set(out.filter(o => o.post === b.post && o.ctx === b.ctx).map(o => o.sec));
+        if (!have.has('GC')) { b.sec = 'GC'; return; }
+      }
       if (b.sec !== 'UNK' || b.rows.some(r => r.timey)) return;
       const have = new Set(out.filter(o => o.post === b.post && o.ctx === b.ctx).map(o => o.sec));
       const guess = ['PTS', 'KOM'].find(k => !have.has(k));
@@ -277,6 +305,7 @@
     });
     // Summary posts written as "1  Rider  Team  0  72": a constant first column, MC points last
     const timedPost = new Set(out.filter(b => b.rows.some(r => r.timey)).map(b => b.post));
+    out.forEach(b => { b.tp = timedPost.has(b.post); });
     out.forEach(b => {
       if (timedPost.has(b.post)) return;
       if (b.rows.some(r => r.one != null)) {
@@ -314,7 +343,8 @@
     const out = base.map(r => ({ ...r, pts: base.isPts ? r.one : (r.pts0 ?? null) }));
     const m = new Map(out.map(r => [rk(r), r]));
     let usedP = base.isPts;
-    const ordered = (others || []).slice().sort((a, b) => (isPointsBlock(b) && isPointsBlock(a) ? b.rows.length - a.rows.length : 0));
+    // points published in a summary post (no times in it) win over a standings list that only looks like points
+    const ordered = (others || []).slice().sort((a, b) => (isPointsBlock(b) && isPointsBlock(a) ? ((a.tp ? 1 : 0) - (b.tp ? 1 : 0)) || (b.rows.length - a.rows.length) : 0));
     for (const b of ordered) {
       const isP = isPointsBlock(b);
       if (isP) { if (usedP) continue; usedP = true; }
@@ -396,27 +426,67 @@
         race.stages = race.stages.filter(s => s !== e1);
         pro.points = true;
       }
+      // team time trial whose team points are listed as a separate sector ("Etapa 1.b" with only teams)
+      for (const ts of race.stages.slice()) {
+        if (!ts.rows.length || ts.rows.filter(r => !r.r && r.t).length < ts.rows.length / 2 || !ts.rows.every(r => (!r.r || !r.t) && r.pts != null)) continue;
+        const sib = race.stages.find(o => o !== ts && Math.floor(o.n) === Math.floor(ts.n) && o.rows.some(r => r.r && r.timey) && !o.rows.some(r => r.pts != null));
+        if (!sib) continue;
+        for (const t of ts.rows) {
+          const tk = teamKey(t.t || t.r);
+          const mine = sib.rows.filter(r => r.r && r.t && (teamKey(r.t) === tk || (tk.length >= 6 && teamKey(r.t).includes(tk))));
+          mine.forEach(r => { r.pts = Math.round(1e6 * t.pts / mine.length) / 1e6; });
+        }
+        race.stages = race.stages.filter(o => o !== ts);
+      }
       // leaders after each stage (from time-based GC blocks)
       race.leaders = {};
       for (const [n, r] of blocks.leaderPts) race.leaders[n] = r.r;
       blocks.filter(b => b.sec === 'GC' && b.ctx != null && !isPointsBlock(b) && b.rows[0] && b.rows[0].r).forEach(b => { race.leaders[b.ctx] = b.rows[0].r; });
-      if (blocks.leaderPts.size) race.cls_.LDR = [...blocks.leaderPts].sort((a, b) => a[0] - b[0]).map(([n, r]) => ({ ...r, p: n, v: '', pts: r.one }));
+      if (blocks.leaderPts.size) {
+        const teamOf = new Map(); race.stages.forEach(s => s.rows.forEach(r => { if (r.r && r.t) teamOf.set(riderKey(r.r), r.t); }));
+        race.cls_.LDR = [...blocks.leaderPts].sort((a, b) => a[0] - b[0]).map(([n, r]) => ({ ...r, t: r.t || teamOf.get(riderKey(r.r)) || null, p: n, v: '', pts: r.one }));
+      }
     } else {
       // one-day race whose points list is headed "Puntos"
-      if (!blocks.some(b => b.sec === 'R' && isPointsBlock(b))) blocks.filter(b => b.sec === 'PTS' && isPointsBlock(b) && b.rows.length >= 5).forEach(b => { b.sec = 'R'; });
+      if (!blocks.some(b => b.sec === 'R' && isPointsBlock(b))) blocks.filter(b => b.sec === 'PTS' && !b.rows.some(r => r.timey) && b.rows.filter(r => r.one != null).length >= Math.max(5, b.rows.length * 0.7)).forEach(b => { b.sec = 'R'; b.rows.forEach(r => { if (r.one == null && /^[\d. ]+$/.test(r.v || '')) { const t = r.v.split(' ').pop(); if (NUM_TOK.test(t)) r.one = toNum(t); } }); });
       const bs = blocks.filter(b => b.sec === 'R');
       const rows = finalize(pickBase(bs, true, true));
       const inf = stageInfo[0] || Object.values(stageInfo)[0] || {};
       if (rows) race.stages.push({ n: 0, label: 'Resultado', type: stageType(inf.rest), rows });
     }
     for (const c of ['GC', 'PTS', 'KOM', 'YOU', 'TEAM']) {
-      const bs = blocks.filter(b => b.sec === c && !b.ttt);
+      // points/mountain standings never carry times: a timed list there is a copy-paste of the GC
+      const bs = blocks.filter(b => b.sec === c && !b.ttt && !((c === 'PTS' || c === 'KOM') && b.rows.filter(r => r.timey).length > b.rows.length / 2));
       const rows = finalize(pickBase(bs, c === 'GC' || c === 'PTS' || c === 'KOM'));
       if (rows && rows.length) race.cls_[c] = rows;
     }
-    const tot = blocks.filter(b => b.sec === 'TOT').pop();
-    if (tot) race.cls_.TOT = tot.rows.map(r => ({ ...r, t: r.t || r.r, r: null, pts: r.one })).sort((a, b) => (b.pts || 0) - (a.pts || 0)).map((r, i) => ({ ...r, p: i + 1 }));
+    const tot = blocks.filter(b => b.sec === 'TOT' && b.rows.some(r => !r.r || !r.t)).pop();
+    const totr = blocks.filter(b => b.sec === 'TOTR').pop();
+    if (totr) race.riderTotals = totr.rows.filter(r => r.r && r.one != null).map(r => [r.r, r.one]);
+    if (tot) race.cls_.TOT = tot.rows.filter(r => !(r.r && r.t)).map(r => ({ ...r, t: r.t || r.r, r: null, pts: r.one })).sort((a, b) => (b.pts || 0) - (a.pts || 0)).map((r, i) => ({ ...r, p: i + 1 }));
+    // one-day team time trial with only team totals published: share them among the team's riders
+    if (!multi && race.stages[0] && race.cls_.TOT && !race.stages[0].rows.some(r => r.pts != null)) {
+      const rows = race.stages[0].rows;
+      const posShared = rows.filter((r, i) => i > 0 && r.p === rows[i - 1].p).length > rows.length / 3;
+      if (posShared || /equipos|squadre|ttt|cre\b|team/i.test(race.name)) {
+        const hasCls = ['YOU', 'TEAM'].some(k => (race.cls_[k] || []).some(r => r.pts));
+        if (!hasCls) for (const t of race.cls_.TOT) {
+          const mine = rows.filter(r => r.r && r.t && teamKey(r.t) === teamKey(t.t));
+          if (mine.length && t.pts) mine.forEach(r => { r.pts = Math.round(1e6 * t.pts / mine.length) / 1e6; });
+        }
+      }
+    }
     race.multi = multi;
+    // pictures (race / stage profiles) posted in the topic
+    const pics = i => ((topic.posts[i] || {}).im || []).filter(Boolean);
+    const firstPic = topic.posts.map((p, i) => pics(i)[0]).find(Boolean) || null;
+    race.im = firstPic;
+    if (multi) for (const st of race.stages) {
+      const b = blocks.find(b => b.ctx === st.n && b.sec === 'R' && b.rows.some(r => r.timey));
+      const im = b ? pics(b.post)[0] : null;
+      if (im && im !== firstPic) st.im = im;
+      else if (im && race.stages.length === 1) st.im = im;
+    }
     return race;
   }
 
@@ -450,7 +520,24 @@
       if (!riders.length) return;
       byMgr.set(p.a || ('#' + p.id), { manager: p.a, team: p.tm || null, date: p.d, riders });
     });
-    return { id: topic.id, title: topic.t.title, ...info, closed: !!topic.t.closed, minR: mr ? +mr[1] : null, maxR: mr ? +(mr[2] || mr[1]) : null, entries: [...byMgr.values()] };
+    const img = (topic.posts[0] && topic.posts[0].im) || topic.img || [];
+    // points scale in the first post: "Puntos:" then "1º 625", "2º 425", … ">31º 3"
+    let sc = null, scRest = null;
+    if (rules) {
+      let on = false;
+      for (const raw of rules.L) {
+        const l = norm(raw);
+        if (/^puntos\b/i.test(l)) { on = true; sc = []; continue; }
+        if (!on) continue;
+        let m = l.match(/^(\d+)\s*[ºª°o]?\.?\s*[:\-]?\s*(\d[\d.,]*)$/);
+        if (m) { sc[+m[1] - 1] = toNum(m[2]); continue; }
+        m = l.match(/^(?:>|\+|más de|desde( el)?)\s*=?\s*(\d+)\s*[ºª°o]?\.?\s*[:\-]?\s*(\d[\d.,]*)$/i);
+        if (m) { scRest = [+m[2], toNum(m[3])]; continue; }
+        if (sc.length) break;
+      }
+      if (sc && !sc.length) sc = null;
+    }
+    return { id: topic.id, title: topic.t.title, ...info, sc, scRest, im: ((topic.posts[0] || {}).im || [])[0] || null, closed: !!topic.t.closed, minR: mr ? +mr[1] : null, maxR: mr ? +(mr[2] || mr[1]) : null, entries: [...byMgr.values()], img: img.slice(0, 4) };
   }
 
   G.MC = { norm, fold, riderKey, tokenKey, teamKey, parseTitle, sectionOf, stageCtx, TeamIndex, learnTeams, topicBlocks, parseRaceTopic, parseInscriptionTopic, isPointsBlock };
