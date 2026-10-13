@@ -6,7 +6,7 @@ on:
   workflow_dispatch:          # botón "Run workflow" para lanzarlo a mano
   push:
     paths:
-      - "scripts/config.json"
+      - "scripts/**"
 
 permissions:
   contents: write
@@ -24,7 +24,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Leer temas nuevos del foro
+      - name: Leer temas nuevos del foro y reconstruir los datos
         env:
           MAX_MINUTES: "320"
         run: node scripts/update.js
@@ -33,11 +33,11 @@ jobs:
         run: |
           git config user.name "managercycling-stats"
           git config user.email "actions@users.noreply.github.com"
-          git add data || true
+          git add data raw || true
           if git diff --cached --quiet; then
             echo "Sin cambios"
           else
-            git commit -m "Datos del foro $(date -u '+%Y-%m-%d %H:%M') UTC"
-            git pull --rebase || true
+            git commit -q -m "Datos del foro $(date -u '+%Y-%m-%d %H:%M') UTC"
+            git pull --rebase -q || true
             git push
           fi
