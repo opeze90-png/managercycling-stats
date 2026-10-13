@@ -302,6 +302,20 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
   .li-date { width: 58px; font-size: 14px; }
   .t-res td.team { display: none; } .t-res th:nth-child(3) { display: none; }
 }
+.mts { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 14px; }
+.mts .card { margin: 0; }
+.mt-h { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-family: var(--f-display); font-size: 22px; font-weight: 700; }
+.mt-h .el { color: var(--ink); }
+.mt-w { list-style: none; margin: 8px 0; padding: 0; }
+.mt-w li { display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; gap: 6px; align-items: center; padding: 4px 0; border-top: 1px solid var(--line-2); }
+.mt-w li:first-child { border-top: 0; }
+.mt-w li > * { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mt-rec { margin: 8px 0 0; font-size: 14px; }
+.rec { display: inline-block; background: var(--gc); color: #1b1600; font-family: var(--f-display); font-weight: 700; text-transform: uppercase; font-size: 12px; letter-spacing: .05em; padding: 1px 6px; border-radius: 4px; margin-right: 4px; }
+.kpi-rec .kpi-who { font-family: var(--f-display); font-size: 22px; font-weight: 700; line-height: 1.15; }
+.lb .sub { white-space: normal; }
+.lb-p.lb-y { width: 40px; }
+@media (max-width: 640px) { .t-hist .hj { display: none; } }
 </style>
 
 <header class="bar">
@@ -313,6 +327,8 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
       <a href="#ranking" data-p="ranking">Ranking</a>
       <a href="#equipos" data-p="equipos">Equipos</a>
       <a href="#stats" data-p="stats">Stats</a>
+      <a href="#miticas" data-p="miticas">Míticas</a>
+      <a href="#hitos" data-p="hitos">Hitos</a>
     </nav>
     <div class="bar-r">
       <div class="search"><input id="q" type="search" placeholder="Buscar corredor, carrera o equipo" autocomplete="off" aria-label="Buscar"><div id="qres" class="qres" hidden></div></div>
@@ -378,7 +394,7 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
   // "Etapa 3 - MON", "Etapa 1 | Mónaco > Mónaco (PRL COL)", "3ª ETAPA", "Tappa 4", "Clásica - COL", "Prólogo"
   function stageCtx(h) {
     const s = norm(h);
-    let m = s.match(/^(?:etapa|[ée]tape|tappa|stage)\s*(\d{1,2})\s*([ab])?(?:\s*(?:[-–|:]\s*|\s+)(.*))?$/i);
+    let m = s.match(/^(?:etapa|[ée]tape|tappa|stage)\s*(\d{1,2})\s*(?:\.\s*)?([ab](?![a-z]))?(?:\s*(?:[-–|:]\s*|\s+)(.*))?$/i);
     if (m && !/^\d/.test(m[3] || '')) return { n: +m[1] + (m[2] ? (m[2].toLowerCase() === 'b' ? 0.5 : 0.25) : 0), rest: norm(m[3] || '') };
     m = s.match(/^(\d{1,2})\s*[ªºa]?\.?\s*etapa\b\s*[-–|:]?\s*(.*)$/i);
     if (m) return { n: +m[1], rest: norm(m[2]) };
@@ -410,10 +426,10 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
 
   // ---------- values ----------
   const TIME_TOK = /^(s\.?t\.?|m\.?t\.?|\+|\+?\d+h\d+'?\d*"?|\+?\d+'\d*"?|\+\d+"?|\d+h\d+'?\d*"?|\d+'\d*"?|\d+:\d{2}(:\d{2})?|\d+"|a|m\.?t\.?)$/i;
-  const NUM_TOK = /^\d{1,3}(\.\d{3})+$|^\d+$/;
+  const NUM_TOK = /^\d{1,3}(\.\d{3})+(,\d+)?$|^\d+(,\d+)?$/;
   const PAREN_TOK = /^\(\d+\)$/;
   const isValTok = t => TIME_TOK.test(t) || NUM_TOK.test(t) || PAREN_TOK.test(t) || /^(dnf|dns|otl|ab|abd|fc|-|–|=|=\+|\+=)$/i.test(t) || /^=\+?\d/.test(t);
-  const toNum = t => parseInt(t.replace(/\./g, ''), 10);
+  const toNum = t => { const v = parseFloat(t.replace(/\./g, '').replace(',', '.')); return Math.round(v * 1e6) / 1e6; };
 
   function splitValues(rest) {
     // rest = "Name Team 4h30'35" → [textPart, valuesPart]
@@ -434,21 +450,12 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
       get(name) { return byKey.get(teamKey(name)); },
       // find team at the END of text: returns [riderPart, team] or null
       splitEnd(text) {
-        if (!sorted) sorted = [...byKey.values()].sort((a, b) => b.length - a.length);
-        const ft = fold(text);
-        for (const t of sorted) {
-          const ftm = fold(t);
-          if (ft === ftm) return ['', t];
-          if (ft.endsWith(' ' + ftm)) return [norm(text.slice(0, text.length - t.length)), t];
+        // longest team name that ends the text, compared without spaces/punctuation
+        const words = norm(text).split(' ');
+        for (let i = 0; i < words.length; i++) {
+          const k = teamKey(words.slice(i).join(' '));
+          if (k && byKey.has(k)) return [words.slice(0, i).join(' '), byKey.get(k)];
         }
-        // looser: compare by teamKey suffix over word boundaries
-        const words = text.split(' ');
-        for (let i = 1; i < words.length; i++) {
-          const cand = words.slice(i).join(' ');
-          const k = teamKey(cand);
-          if (byKey.has(k)) return [words.slice(0, i).join(' '), byKey.get(k)];
-        }
-        if (byKey.has(teamKey(text))) return ['', byKey.get(teamKey(text))];
         return null;
       },
       all() { return [...byKey.values()]; },
@@ -474,6 +481,9 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
     let l = line.replace(/\b([sm])\.\s+t\./gi, '$1.t.').replace(/^\s*spoiler:\s*/i, '').replace(/^\s*final\s*\(spoiler\):\s*/i, '');
     // "Clásica:1 Paul Lapeira ..." → header + row
     if (/^l[íi]der\b/i.test(l)) return [null, ''];
+    // "Etapa 19 1 Tobias Halland Johannessen Lidl-Trek 480" → header + row
+    const g = l.match(/^((?:etapa|stage)\s*\d+\s*(?:\.?\s*[ab](?![a-z]))?|pr[oó]logo)[\t ]+(\d+[.º]?[\t ]+\D.*)$/i);
+    if (g) return [norm(g[1]), g[2]];
     const m = l.match(/^([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9() ]{2,30}?):+\s*(\d+[\t ].*)$/);
     if (m) return [m[1], m[2]];
     const t = l.match(/^([^\t\d][^\t]{1,40}?)\t+(\d+\t.*)$/);
@@ -532,17 +542,27 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
       }
       if (groups.length === 2 && groups[0] === 't' && groups[1] === 'n') { pts0 = toNum(toks.pop()); vals = toks.join(' '); }
     }
+    if (rider && /^[a-zà-ÿ]/.test(norm(rider)) && !/^(de|del|van|von|da|di|le|la)\s/i.test(norm(rider))) return null; // narrative text, not a rider
     return { p: pos, r: rider ? norm(rider) : null, t: team ? (teams.get(team) || norm(team)) : null, v: vals.slice(0, 40), one, timey, pts0 };
   }
 
   // ---------- topic → blocks ----------
   function topicBlocks(posts, raceName, teams, log) {
-    const blocks = [];
+    const blocks = [], leaderPts = new Map();
     posts.forEach((p, pi) => {
       if (!p.L || !p.L.length || /contenido patrocinado/i.test(p.a || '')) return;
       let ctx = null, ctxInfo = null, sec = null, cur = null, lastPos = null;
       const start = (s) => { cur = { post: pi, ctx, ctxInfo, sec: s, rows: [] }; blocks.push(cur); lastPos = null; };
       for (const raw of p.L) {
+        const lr = raw.replace(/^\s*spoiler:\s*/i, '');
+        if (/^\s*l[íi]der\b/i.test(lr)) {
+          // "Líder Remco Evenepoel (J)  Team Flanders - Baloise  96": puntos MC por ir líder tras la etapa
+          const rest = lr.replace(/^\s*l[íi]der\s*:?\s*/i, '');
+          const r = /\d\s*$/.test(rest) ? parseRow(rest, 'R', teams) : null;
+          if (r && r.one == null && /^[\d. ]+$/.test(r.v || '')) { const t = r.v.split(' ').pop(); if (NUM_TOK.test(t)) { r.one = toNum(t); r.v = t; } }
+          if (r && r.r && r.one != null && ctx != null) leaderPts.set(ctx, r);
+          continue;
+        }
         let [hdr, line] = preSplit(raw);
         const lines = hdr ? [hdr, line] : [line];
         for (const l0 of lines) {
@@ -557,10 +577,19 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
             if (sc) { ctx = sc.n; ctxInfo = sc; sec = 'R'; cur = null; continue; }
             const s = sectionOf(t, raceName);
             if (s) { sec = s === 'IGN' ? null : s; cur = null; continue; }
-            // a bare team/rider row without position (e.g. TTT members "Name Team 75")
-            if (sec && /\d$/.test(t)) {
+            // a bare team/rider row without position (e.g. TTT members "Name Team 75"), or a points
+            // list written without positions at the top of a post: "Yves Lampaert  Intermarché - Wanty  220"
+            if ((sec || /^[A-ZÀ-Ý][^\d:]{3,80}\s\d[\d.,]*$/.test(t)) && /\d$/.test(t)) {
               const r = parseRow(t, sec, teams);
-              if (r && r.t) { if (!cur) start(sec); r.p = lastPos || 1; cur.rows.push(r); continue; }
+              if (r && r.t && sec) {
+                if (cur && r.r && cur.rows.some(x => x.r && riderKey(x.r) === riderKey(r.r))) { sec = 'UNK'; start(sec); }
+                if (!cur) start(sec);
+                r.p = lastPos || (cur.rows.length + 1); r.np = 1; cur.rows.push(r); continue;
+              }
+              if (r && r.t && r.r && r.r.split(' ').length <= 5 && r.one != null) {
+                if (!cur || cur.sec !== 'NP' || cur.rows.some(x => x.r && riderKey(x.r) === riderKey(r.r))) { sec = null; start('NP'); }
+                r.p = cur.rows.length + 1; cur.rows.push(r); continue;
+              }
             }
             if (t.length < 40 && log) log('hdr', t);
             continue;
@@ -570,12 +599,37 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
           const r = parseRow(norm(l.replace(/\t/g, '\t')).length ? l : l, s, teams);
           if (!r) { if (log) log('row?', l); continue; }
           if (!cur || cur.sec !== s) { sec = s; start(s); }
+          // a classification list that restarts at 1 without a header is another classification
+          else if (r.p === 1 && lastPos >= 3 && ['GC', 'PTS', 'KOM', 'YOU', 'TEAM'].includes(s)) { sec = s = 'UNK'; start(s); }
+          // a results list followed by a headerless young riders' list: "1 Jasper Philipsen (J) ..."
+          else if (r.p === 1 && lastPos >= 3 && s === 'R' && r.r && /\(J\)/i.test(r.r)) { sec = s = 'YOU'; start(s); }
           if (r.p == null) { r.np = 1; r.p = lastPos || 1; } else lastPos = r.p;
           cur.rows.push(r);
         }
       }
     });
     const out = blocks.filter(b => b.rows.length);
+    out.leaderPts = leaderPts;
+    out.forEach((b, i) => { if (b.sec === 'NP') b.sec = i > 0 && out[i - 1].post === b.post && b.rows.every(r => /\(J\)/i.test(r.r || '')) ? 'YOU' : 'R'; });
+    out.forEach(b => {
+      if (b.sec === 'UNK' && b.rows.length && b.rows.every(r => r.r && /\(J\)/i.test(r.r))) { b.sec = 'YOU'; return; }
+      if (b.sec !== 'UNK' || b.rows.some(r => r.timey)) return;
+      const have = new Set(out.filter(o => o.post === b.post && o.ctx === b.ctx).map(o => o.sec));
+      const guess = ['PTS', 'KOM'].find(k => !have.has(k));
+      if (guess && b.rows.every(r => /^\d+ \d+$/.test(r.v))) b.sec = guess;
+    });
+    // Summary posts written as "1  Rider  Team  0  72": a constant first column, MC points last
+    const timedPost = new Set(out.filter(b => b.rows.some(r => r.timey)).map(b => b.post));
+    out.forEach(b => {
+      if (timedPost.has(b.post)) return;
+      if (b.rows.some(r => r.one != null)) {
+        // stray "0 18" rows inside a points list: the MC points are the last number
+        if (b.rows.filter(r => r.one != null).length >= b.rows.length * 0.7) b.rows.forEach(r => { if (r.one == null && /^[\d. ]+$/.test(r.v) && r.v.includes(' ')) { const t = r.v.split(' ').pop(); if (NUM_TOK.test(t)) r.one = toNum(t); } });
+        return;
+      }
+      const toks = b.rows.map(r => r.v.split(' '));
+      if (toks.every(t => t.length === 2 && t[0] === toks[0][0] && NUM_TOK.test(t[1]))) b.rows.forEach((r, i) => { r.one = toNum(toks[i][1]); r.v = toks[i][1]; });
+    });
     // headerless team-only lists: "Team<TAB>652" → team totals; "1 Team 40" → team classification
     out.forEach(b => {
       if (b.sec === 'R' && b.rows.every(r => !r.r && r.t)) b.sec = b.rows.filter(r => r.np).length > b.rows.length / 2 ? 'TOT' : 'TEAM';
@@ -594,7 +648,8 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
   }
 
   // ---------- assemble race ----------
-  const isPointsBlock = b => b.rows.length > 0 && b.rows.every(r => r.one != null);
+  // a points list: every row has a single number, or the list goes on without values ("36 Connor Swift  Team")
+  const isPointsBlock = b => b.rows.length > 0 && b.rows.some(r => r.one != null) && b.rows.every(r => r.one != null || (!r.v && !r.timey));
   const hasTime = b => b.rows.some(r => r.timey);
   function rk(r) { return r.r ? 'r:' + riderKey(r.r) : 't:' + teamKey(r.t || ''); }
 
@@ -602,7 +657,8 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
     const out = base.map(r => ({ ...r, pts: base.isPts ? r.one : (r.pts0 ?? null) }));
     const m = new Map(out.map(r => [rk(r), r]));
     let usedP = base.isPts;
-    for (const b of others || []) {
+    const ordered = (others || []).slice().sort((a, b) => (isPointsBlock(b) && isPointsBlock(a) ? b.rows.length - a.rows.length : 0));
+    for (const b of ordered) {
       const isP = isPointsBlock(b);
       if (isP) { if (usedP) continue; usedP = true; }
       if (!isP && !b.rows.some(r => r.pts0 != null)) continue;
@@ -660,6 +716,18 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
         const bs = blocks.filter(b => b.sec === 'R' && b.ctx === n);
         const rows = finalize(pickBase(bs, true, true));
         if (!rows) continue;
+        // Crono por equipos: los puntos se publican por equipo y se reparten entre sus corredores
+        if (!rows.some(r => r.pts != null)) {
+          const tb = blocks.filter(b => b.ctx === n && (b.sec === 'TEAM' || b.sec === 'R') && isPointsBlock(b) && b.rows.every(r => !r.r && r.t)).pop();
+          if (tb) {
+            tb.ttt = true;
+            for (const t of tb.rows) {
+              if (t.one == null) continue;
+              const mine = rows.filter(r => r.r && r.t && teamKey(r.t) === teamKey(t.t));
+              mine.forEach(r => { r.pts = Math.round(1e6 * t.one / mine.length) / 1e6; });
+            }
+          }
+        }
         const inf = stageInfo[n] || {};
         race.stages.push({ n, label: inf.prologue ? 'Prólogo' : 'Etapa ' + (Number.isInteger(n) ? n : Math.floor(n) + (n % 1 === 0.5 ? 'b' : 'a')), type: stageType(inf.rest) || (inf.prologue ? 'PRL' : null), route: cleanRoute(inf.rest), rows });
       }
@@ -673,16 +741,20 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
       }
       // leaders after each stage (from time-based GC blocks)
       race.leaders = {};
+      for (const [n, r] of blocks.leaderPts) race.leaders[n] = r.r;
       blocks.filter(b => b.sec === 'GC' && b.ctx != null && !isPointsBlock(b) && b.rows[0] && b.rows[0].r).forEach(b => { race.leaders[b.ctx] = b.rows[0].r; });
+      if (blocks.leaderPts.size) race.cls_.LDR = [...blocks.leaderPts].sort((a, b) => a[0] - b[0]).map(([n, r]) => ({ ...r, p: n, v: '', pts: r.one }));
     } else {
+      // one-day race whose points list is headed "Puntos"
+      if (!blocks.some(b => b.sec === 'R' && isPointsBlock(b))) blocks.filter(b => b.sec === 'PTS' && isPointsBlock(b) && b.rows.length >= 5).forEach(b => { b.sec = 'R'; });
       const bs = blocks.filter(b => b.sec === 'R');
       const rows = finalize(pickBase(bs, true, true));
       const inf = stageInfo[0] || Object.values(stageInfo)[0] || {};
       if (rows) race.stages.push({ n: 0, label: 'Resultado', type: stageType(inf.rest), rows });
     }
     for (const c of ['GC', 'PTS', 'KOM', 'YOU', 'TEAM']) {
-      const bs = blocks.filter(b => b.sec === c);
-      const rows = finalize(pickBase(bs, c === 'GC'));
+      const bs = blocks.filter(b => b.sec === c && !b.ttt);
+      const rows = finalize(pickBase(bs, c === 'GC' || c === 'PTS' || c === 'KOM'));
       if (rows && rows.length) race.cls_[c] = rows;
     }
     const tot = blocks.filter(b => b.sec === 'TOT').pop();
@@ -738,7 +810,7 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
 //  ins:    [{id, s, name, start, end, c, cls, closed, rp, min, max, e:[{m, t, d, r:[riderId]}]}]
 (function (G) {
   const MC = G.MC;
-  const SEC_ORDER = ['GC', 'PTS', 'KOM', 'YOU', 'TEAM', 'TOT'];
+  const SEC_ORDER = ['GC', 'PTS', 'KOM', 'YOU', 'TEAM', 'TOT', 'LDR'];
 
   function lev(a, b) {
     if (Math.abs(a.length - b.length) > 2) return 9;
@@ -750,6 +822,30 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
     }
     return prev[b.length];
   }
+
+  // Limpia restos pegados al nombre del corredor: "1.Remco Evenepoel", "GBR Simon Yates",
+  // "Remco Evenepoel CN", "Mauri Vansevenant Team Novo Nordisk 1[/b]".
+  const NOC = new Set('ALB AND ARG ARM AUS AUT AZE BEL BLR BRA BUL CAN CHI CHL CHN COL CRC CRO CUB CYP CZE DEN ECU EGY ERI ESP EST ETH FIN FRA GBR GEO GER GRE GUA HKG HOL HUN IRL IRI ISR ITA JPN KAZ KOR LAT LTU LUX MAR MDA MEX MGL MKD MNE NED NOR NZL PAN PAR PER POL POR PUR ROU RSA RUS RWA SLO SMR SRB SUI SVK SWE SWI THA TUN TUR UAE UKR URU USA UZB VEN'.split(' '));
+  const JUNK = /invitad|invitaci|reserva|borrar|recuperando|national champion|km a meta|pelot[oó]n|^dnf$|^dns$|^otl$|^equipos?\b/i;
+  function cleanName(name) {
+    let s = MC.norm(String(name).replace(/\[\/?[a-z]+\]/gi, ' '));
+    s = s.replace(/^\d+\s*[.)º-]\s*/, '');
+    const m = s.match(/^([A-Z]{3})\s+(.+)$/);
+    if (m && NOC.has(m[1]) && m[2].split(' ').length >= 2) s = m[2];
+    s = s.replace(/\s+(CN|CC|CM|CE|EEUU|\(CN\)|\(CM\))$/, '').replace(/\s+\d+([.,]\d+)?$/, '');
+    return MC.norm(s);
+  }
+  const isJunk = name => !name || JUNK.test(name) || !/[a-zà-ž]/i.test(name) || name.length > 40;
+  // "MCNULTY Brandon" → "Brandon Mcnulty" cuando no hay otra forma del nombre
+  const cap = w => w.split(/([-'’ ])/).map(x => x.length > 1 ? x[0] + x.slice(1).toLowerCase() : x).join('').replace(/^Mc([a-z])/, (a, b) => 'Mc' + b.toUpperCase());
+  function fixCaps(n) {
+    const t = n.split(' ');
+    const up = t.filter(w => w.length > 1 && /^[A-ZÀ-Þ'’-]+$/.test(w) && /[A-Z]/.test(w));
+    if (!up.length || up.length === t.length) return n;
+    const low = t.filter(w => !up.includes(w));
+    return [...low, ...up.map(cap)].join(' ');
+  }
+  const capsPenalty = n => /\b[A-ZÀ-Þ]{3,}\b/.test(n) ? 0.3 : 1;
 
   function Compactor(seed) {
     const data = seed ? JSON.parse(JSON.stringify(seed)) : { v: 2, seasons: [], teams: [], riders: [], races: [], ins: [] };
@@ -770,6 +866,12 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
       }
       return teamId.get(k);
     };
+    // "Mauri Vansevenant Team Novo Nordisk" → "Mauri Vansevenant"
+    const stripTeam = name => {
+      const w = name.split(' ');
+      for (let i = 2; i < w.length; i++) { const k = MC.teamKey(w.slice(i).join(' ')); if (k.length >= 4 && teamId.has(k)) return w.slice(0, i).join(' '); }
+      return name;
+    };
     let curSeason = null;
     const markYoung = id => { if (curSeason && !data.riders[id].includes(curSeason, 1)) data.riders[id].push(curSeason); };
     const touch = (id, name) => {
@@ -779,6 +881,8 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
     };
     const rid = (name, create = true) => {
       if (!name) return -1;
+      name = stripTeam(cleanName(name));
+      if (isJunk(name)) return -1;
       const k = MC.riderKey(name);
       if (!k) return -1;
       let id = riderId.get(k);
@@ -809,6 +913,37 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
       if (i >= 0) list[i] = obj; else list.push(obj);
     }
 
+      // Some results posts stop listing points half way ("Spoiler:36 Connor Swift  Team" without points)
+    // while the official ranking still gives them. Fill those gaps with the usual points for that
+    // position in one-day races of the same class and season.
+  function fillScales() {
+      const scale = new Map();
+      const key = r => r.s + '|' + r.cls;
+      for (const r of data.races) {
+        if (r.multi || !r.st[0] || !r.cls) continue;
+        const rows = r.st[0].rows;
+        if (rows.filter(x => x[4] != null).length < rows.length * 0.9) continue;
+        if (!scale.has(key(r))) scale.set(key(r), new Map());
+        const m = scale.get(key(r));
+        for (const x of rows) if (x[4] != null && x[0] > 0) { const c = m.get(x[0]) || new Map(); c.set(x[4], (c.get(x[4]) || 0) + 1); m.set(x[0], c); }
+      }
+      let filled = 0;
+      for (const r of data.races) {
+        if (r.multi || !r.st[0] || !scale.has(key(r))) continue;
+        const rows = r.st[0].rows, m = scale.get(key(r));
+        const withP = rows.filter(x => x[4] != null).length;
+        if (!withP || withP === rows.length) continue;
+        const lastP = Math.max(...rows.filter(x => x[4] != null).map(x => x[0]));
+        for (const x of rows) {
+          if (x[4] != null || !(x[0] > lastP) || x[1] < 0) continue;
+          const c = m.get(x[0]); if (!c) continue;
+          let best = null, bn = 0; for (const [v, n] of c) if (n > bn) { bn = n; best = v; }
+          if (best != null && bn >= 2) { x[4] = best; filled++; }
+        }
+      }
+      return filled;
+    }
+
     return {
       data,
       addRace(r, replies) {
@@ -824,18 +959,20 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
         curSeason = seasonOf(i);
         const o = { id: i.id, s: seasonOf(i), name: i.name, start: i.start, end: i.end, c: i.country, cls: i.cls, note: i.note || undefined, closed: i.closed ? 1 : 0, rp: replies, min: i.minR, max: i.maxR,
           e: i.entries.map(e => ({ m: e.manager, t: e.team, d: e.date, r: e.riders.map(x => {
-            if (teamId.has(MC.teamKey(x.name))) return -1;
+            if (teamId.has(MC.teamKey(x.name)) || isJunk(stripTeam(cleanName(x.name)))) return -1;
             let id = rid(x.name, false);
-            if (id < 0) { id = fuzzy(x.name); if (id >= 0) touch(id, x.name); else id = rid(x.name); }
+            if (id < 0) { const cn = stripTeam(cleanName(x.name)); id = fuzzy(cn); if (id >= 0) touch(id, cn); else id = rid(x.name); }
             if (x.young) markYoung(id);
             return id;
           }).filter(id => id >= 0) })).filter(e => e.r.length) };
         upsert(data.ins, o);
       },
       finish(meta) {
+        fillScales();
         data.riders.forEach((r, i) => {
-          const v = Object.entries(votes[i] || {}).sort((a, b) => b[1] - a[1] || b[0].length - a[0].length);
+          const v = Object.entries(votes[i] || {}).map(([n, c]) => [n, c * capsPenalty(n)]).sort((a, b) => b[1] - a[1] || b[0].length - a[0].length);
           if (v.length) r[0] = v[0][0];
+          r[0] = fixCaps(r[0]);
           const ys = r.slice(1).filter(y => typeof y === 'number' && y > 1900).sort();
           r.length = 1; r.push(...ys);
         });
@@ -1045,7 +1182,7 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
   const TODAY = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
   const CLS_NAME = { GC: 'General', PTS: 'Regularidad', KOM: 'Montaña', YOU: 'Jóvenes', TEAM: 'Equipos', TOT: 'Puntos MC por equipos' };
   const CLS_SHORT = { GC: 'General', PTS: 'Puntos', KOM: 'Montaña', YOU: 'Jóvenes', TEAM: 'Equipos', TOT: 'Pts MC equipos' };
-  const fmtN = n => n == null ? '' : n.toLocaleString('es-ES');
+  const fmtN = n => n == null ? '' : (Math.round(n * 100) / 100).toLocaleString('es-ES', { maximumFractionDigits: 2 });
   const dshort = d => d ? `${+d.slice(8, 10)} ${MES[+d.slice(5, 7) - 1]}` : '';
   const drange = (a, b) => !a ? '' : (!b || a === b ? dshort(a) : (a.slice(5, 7) === b.slice(5, 7) ? `${+a.slice(8, 10)}–${+b.slice(8, 10)} ${MES[+b.slice(5, 7) - 1]}` : `${dshort(a)} – ${dshort(b)}`));
   const daysBetween = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / 864e5);
@@ -1099,13 +1236,14 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
     const evFor = (o, kind) => {
       let k = eventKey(o.s, o.name, o.start);
       let ev = byKey.get(k);
+      if (ev && ev[kind]) ev = null; // dos temas distintos con la misma clave: no mezclarlos
       if (!ev) {
         // fallback: same start date and same first word
         const fw = MC.riderKey(o.name).split(' ')[0];
         ev = ix.events.find(e => e.start === o.start && !e[kind] && MC.riderKey(e.name).split(' ')[0] === fw);
       }
       if (!ev) { ev = { key: k, s: o.s, name: o.name, start: o.start, end: o.end, c: o.c, cls: o.cls, note: o.note }; ix.events.push(ev); }
-      byKey.set(k, ev);
+      if (!byKey.has(k) || !byKey.get(k)[kind]) byKey.set(k, ev);
       ev[kind] = o;
       if (kind === 'race') { ev.name = o.name; ev.end = ev.end || o.end; }
       return ev;
@@ -1117,27 +1255,47 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
 
     const S = y => { if (!ix.season.has(y)) ix.season.set(y, { riders: new Map(), teams: new Map(), managers: new Map(), teamMgr: new Map() }); return ix.season.get(y); };
     const RS = (st, rid) => { let o = st.riders.get(rid); if (!o) { o = { pts: 0, wins: 0, gc: 0, pod: 0, top10: 0, days: 0, races: 0, lead: 0, best: [], last: null, lastT: -1 }; st.riders.set(rid, o); } return o; };
-    const TS = (st, tid) => { let o = st.teams.get(tid); if (!o) { o = { pts: 0, rpts: 0, wins: 0, riders: new Set(), winsList: [] }; st.teams.set(tid, o); } return o; };
+    const TS = (st, tid) => { let o = st.teams.get(tid); if (!o) { o = { pts: 0, rpts: 0, tot: 0, wins: 0, riders: new Set(), winsList: [] }; st.teams.set(tid, o); } return o; };
 
     for (const r of D.races) {
       const st = S(r.s), seen = new Set();
       const add = (row, k, si) => {
         const [p, rid, tid, v, pts] = row;
+        if (tid >= 0 && pts && k !== 'TOT') TS(st, tid).pts += pts; // puntos de equipo = suma de puntos de sus corredores + clasificación por equipos
         if (rid < 0) return;
         ix.riderRes[rid].push({ r, k, si, p, pts, v, t: tid });
         ix.riderSeasons[rid].add(r.s);
         const o = RS(st, rid);
         o.pts += pts || 0;
-        if (k === 'st') { const dk = rid + ':' + Math.floor(r.st[si].n); if (!seen.has(dk)) { seen.add(dk); o.days++; } if (p === 1) { o.wins++; o.best.push({ r, si }); } if (p <= 3) o.pod++; if (p <= 10) o.top10++; }
+        if (k === 'st') { if (p === 1) { o.wins++; o.best.push({ r, si }); } if (p <= 3) o.pod++; if (p <= 10) o.top10++; }
         if (k === 'GC' && r.multi) { if (p === 1) { o.gc++; o.wins++; } if (p <= 3) o.pod++; if (p <= 10) o.top10++; }
         if (!seen.has(rid)) { seen.add(rid); o.races++; }
         if (tid >= 0 && !seen.has('t' + rid)) { seen.add('t' + rid); o.tv = o.tv || new Map(); o.tv.set(tid, (o.tv.get(tid) || 0) + 1); }
         if (tid >= 0) { const t = TS(st, tid); t.riders.add(rid); t.rpts += pts || 0; if (p === 1 && (k === 'st' || (k === 'GC' && r.multi))) { t.wins++; t.winsList.push({ r, k, si, rid }); } }
       };
       r.st.forEach((s, si) => s.rows.forEach(row => add(row, 'st', si)));
-      for (const k of ['GC', 'PTS', 'KOM', 'YOU']) (r.cl[k] || []).forEach(row => add(row, k));
-      (r.cl.TOT || []).forEach(([p, , tid, v, pts]) => { if (tid >= 0) TS(st, tid).pts += pts || 0; });
+      for (const k of ['GC', 'PTS', 'KOM', 'YOU', 'LDR']) (r.cl[k] || []).forEach(row => add(row, k));
+      (r.cl.TEAM || []).forEach(([p, rid, tid, v, pts]) => { if (tid >= 0 && pts) TS(st, tid).pts += pts; });
+      (r.cl.TOT || []).forEach(([p, , tid, v, pts]) => { if (tid >= 0) TS(st, tid).tot += pts || 0; });
       if (r.ld) Object.values(r.ld).forEach(rid => { if (rid >= 0) RS(st, rid).lead++; });
+      // días de competición: una clásica = 1 día; en vueltas, hasta la etapa en que abandona (incluida);
+      // los dobles sectores del mismo día cuentan como uno
+      const dayRows = new Map();
+      if (/^(WC|OG)\./.test(r.cls || '')) { /* Mundiales y JJOO no cuentan para el límite de días */ }
+      else if (!r.multi) {
+        r.st.forEach(s => s.rows.forEach(w => { if (w[1] >= 0) dayRows.set(w[1], 1); }));
+        for (const k of ['GC', 'PTS', 'KOM', 'YOU', 'LDR']) (r.cl[k] || []).forEach(w => { if (w[1] >= 0) dayRows.set(w[1], 1); });
+      } else {
+        const dayN = [...new Set(r.st.map(s => Math.floor(s.n)))].sort((a, b) => a - b);
+        const span = r.end && r.start ? daysBetween(r.start, r.end) + 1 : dayN.length;
+        const D = Math.min(dayN.length, span);
+        const ended = !(r.end && r.end >= TODAY);
+        r.st.forEach(s => { const di = dayN.indexOf(Math.floor(s.n)); s.rows.forEach(w => { if (w[1] >= 0) dayRows.set(w[1], Math.max(dayRows.get(w[1]) || 0, di + 1)); }); });
+        const gc = new Set((r.cl.GC || []).map(w => w[1]));
+        for (const [rid, d] of dayRows) dayRows.set(rid, gc.has(rid) ? D : Math.min(D, ended ? d + 1 : d));
+        for (const rid of gc) if (rid >= 0 && !dayRows.has(rid)) dayRows.set(rid, D);
+      }
+      for (const [rid, d] of dayRows) RS(st, rid).days += d;
     }
     // rider's team per season (team he raced most races with)
     for (const [, st] of ix.season) for (const [, o] of st.riders) { let b = -1, bv = 0; if (o.tv) for (const [t, v] of o.tv) if (v > bv) { bv = v; b = t; } o.lastT = b; }
@@ -1157,14 +1315,15 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
         const ev = ix.evById.get('i' + i.id);
         if (i.start >= TODAY || (ev && !ev.race)) for (const rid of e.r) {
           if (!ix.next.has(rid)) ix.next.set(rid, []); ix.next.get(rid).push({ ev, i, e });
-          const o = RS(st, rid); o.planned = (o.planned || 0) + (i.end ? daysBetween(i.start, i.end) + 1 : 1);
+          const o = RS(st, rid); if (!/^(WC|OG)\./.test(i.cls || '')) o.planned = (o.planned || 0) + (i.end ? daysBetween(i.start, i.end) + 1 : 1);
         }
       }
     }
     for (const [, st] of ix.season) for (const [m, mm] of st.managers) { let best = -1, bv = 0; for (const [t, v] of mm) if (v > bv) { bv = v; best = t; } const cur = st.teamMgr.get(best); if (!cur || cur.n < bv) st.teamMgr.set(best, { m, n: bv }); }
     ix.seasons = [...ix.season.keys()].sort((a, b) => b - a);
     IX = ix;
-    if (!state.season || !IX.season.has(state.season)) state.season = +(ls.get('mcs.season')) && IX.season.has(+ls.get('mcs.season')) ? +ls.get('mcs.season') : ix.seasons[0];
+    const saved = +(ls.get('mcs.season'));
+    if (!state.season || !IX.season.has(state.season) || (!state.userSeason && saved && saved !== state.season && IX.season.has(saved))) state.season = saved && IX.season.has(saved) ? saved : ix.seasons[0];
     renderSeasonSelect();
   }
 
@@ -1371,10 +1530,8 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
         ${stageW ? `<section class="card"><h2 class="h2">Ganadores de etapa</h2><ul class="sw">${stageW}</ul></section>` : ''}
         ${leadDays.size ? `<section class="card"><h2 class="h2">Días de líder</h2><ul class="jw">${[...leadDays.entries()].sort((a, b) => b[1] - a[1]).map(([rid, n]) => `<li>${jersey('GC')}${rlink(rid)}<span class="n strong">${n}</span></li>`).join('')}</ul></section>` : ''}`;
     }
-    // palmarés: same race in other seasons
-    const nk = MC.riderKey(ev.name);
-    const hist = IX.events.filter(e => e.race && MC.riderKey(e.name) === nk && winnerOf(e.race)).sort((a, b) => b.s - a.s);
-    if (hist.length > 1 || (hist.length === 1 && hist[0] !== ev)) side += `<section class="card"><h2 class="h2">Palmarés</h2><ul class="wl">${hist.map(e => { const w = winnerOf(e.race); return `<li><span class="li-date">${e.s}</span><span>${rlink(w[1])}</span><a class="small" href="#carrera-${e.id}">${e === ev ? 'esta edición' : 'ver'}</a></li>`; }).join('')}</ul></section>`;
+    // palmarés: misma carrera en otras temporadas
+    if (r) { const g = history().byKey.get(r.hk || raceKey(r.name, r.cls)); if (g && g.eds.length) side += `<section class="card"><div class="card-h"><h2 class="h2">Palmarés</h2><a class="more" href="#historia-${g.slug}">Historial</a></div><ul class="wl">${g.eds.slice().reverse().map(e => `<li><span class="li-date">${e.s}</span><span>${e.w ? rlink(e.w[1]) : '—'}</span><a class="small" href="#carrera-${e.ev.id}">${e.ev === ev ? 'esta edición' : 'ver'}</a></li>`).join('')}</ul>${g.rec[0] && g.rec[0][1].length > 1 ? `<p class="small"><span class="rec">Récord</span> ${rlink(g.rec[0][0])} · ${g.rec[0][1].length} victorias</p>` : ''}</section>`; }
     if (ev.ins && cur !== 'sl') side += `<section class="card"><h2 class="h2">Inscripción</h2><p class="small">${ev.ins.e.length} equipos inscritos. <a href="#carrera-${ev.id}" data-tab="sl">Ver inscritos</a></p></section>`;
     const links = [r ? `<a href="${FORUM}/t${r.id}-" target="_blank" rel="noopener">Resultados en el foro</a>` : '', ev.ins ? `<a href="${FORUM}/t${ev.ins.id}-" target="_blank" rel="noopener">Inscripciones en el foro</a>` : ''].filter(Boolean).join(' · ');
     return `<header class="ph">
@@ -1515,7 +1672,7 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
     const y = state.season, st = IX.season.get(y);
     const list = st ? [...st.teams.entries()].filter(([t, o]) => t >= 0 && o.riders.size >= 3) : [];
     list.sort((a, b) => (b[1].pts || b[1].rpts) - (a[1].pts || a[1].rpts));
-    return `<header class="ph"><div class="ph-meta"><span class="eyebrow">Temporada ${y}</span></div><h1 class="h1">Equipos</h1><p class="muted">Puntos por equipos según los totales que publica el foro tras cada carrera.</p></header>
+    return `<header class="ph"><div class="ph-meta"><span class="eyebrow">Temporada ${y}</span></div><h1 class="h1">Equipos</h1><p class="muted">Puntos MC de equipo: los puntos de todos sus corredores más los de la clasificación por equipos de cada carrera, como en la clasificación oficial.</p></header>
       <section class="card"><div class="tw"><table class="t t-rank"><thead><tr><th class="n">#</th><th>Equipo</th><th>Mánager</th><th class="n">Corredores</th><th class="n">Victorias</th><th class="n">Pts MC equipo</th></tr></thead><tbody>
       ${list.map(([tid, o], i) => `<tr><td class="n">${i + 1}</td><td>${tlink(tid, 'strongish')}</td><td class="muted">${esc(st.teamMgr.get(tid)?.m || '')}</td><td class="n">${o.riders.size}</td><td class="n">${o.wins || ''}</td><td class="n strong">${fmtN(o.pts || o.rpts)}</td></tr>`).join('')}</tbody></table></div></section>`;
   }
@@ -1586,6 +1743,221 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
       </div>`;
   }
 
+  // ----- historia: carreras míticas, récords e hitos -----
+  const RACE_ALIAS = [
+    [/^tour(de)?france$/, 'tour-de-france'], [/giro.?d.?italia/, 'giro-d-italia'], [/vuelta.*espana|^lavuelta/, 'vuelta-a-espana'],
+    [/rondevanvlaanderen|tourdesflandres/, 'ronde-van-vlaanderen'], [/^omloop(het)?nieuwsblad/, 'omloop-nieuwsblad'], [/cyclassics/, 'cyclassics-hamburg'],
+    [/donostia|dssk|sansebastian.*klasikoa/, 'klasikoa-san-sebastian'], [/cadelevans/, 'cadel-evans-great-ocean-road-race'],
+    [/benelux|renewi/, 'renewi-tour'], [/bruggedepanne/, 'classic-brugge-de-panne'], [/^e3/, 'e3-classic'],
+    [/dwarsdoorvlaanderen/, 'dwars-door-vlaanderen'], [/bretagneclassic/, 'bretagne-classic'], [/quebec/, 'gp-quebec'], [/montreal/, 'gp-montreal'],
+    [/guangxi/, 'tour-of-guangxi'], [/tourdownunder/, 'tour-down-under'], [/tirreno/, 'tirreno-adriatico'], [/parisnice/, 'paris-nice'],
+    [/eschborn/, 'eschborn-frankfurt'], [/gentwevelgem/, 'gent-wevelgem'], [/milanosanremo/, 'milano-sanremo'], [/parisroubaix/, 'paris-roubaix'],
+    [/liegebastogneliege/, 'liege-bastogne-liege'], [/lombardia/, 'il-lombardia'], [/flechewallonne/, 'la-fleche-wallonne'], [/amstelgold/, 'amstel-gold-race'],
+    [/criteriumdudauphine|tourauvergnerhonealpes/, 'criterium-du-dauphine'], [/catalunya/, 'volta-a-catalunya'], [/itzulia|paisvasco/, 'itzulia'],
+  ];
+  const STOP = new Set(['de', 'del', 'la', 'le', 'les', 'el', 'the', 'of', 'men', 'elite', 'a', 'y', 'et', 'des']);
+  function raceKey(name, cls) {
+    const toks = MC.fold(name).replace(/\(.*?\)/g, ' ').replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter(t => t && !STOP.has(t) && !/^(19|20)\d\d$/.test(t));
+    const compact = toks.join('');
+    let k = null;
+    for (const [re, v] of RACE_ALIAS) if (re.test(compact)) { k = v; break; }
+    if (!k) k = toks.join('-') || 'x';
+    if (/U$/.test(cls || '') || /u23|espoirs|nextgen|piccolo|baby|juniors|sub23|under23/.test(compact)) k = k.replace(/-u23$/, '') + '-u23';
+    const tt = /\.TT$/.test(cls || '') || /(^| )(itt|cri|contrarreloj)( |$)/.test(toks.join(' '));
+    if (/^(WC|OG|NC)\./.test(cls || '') || /championships|olympic|campeonato/.test(compact)) k = k.replace(/-?(itt|cri)(-|$)/g, '$2').replace(/-$/, '') + (tt ? '-cri' : '-ruta');
+    return k;
+  }
+  const isGT = r => /GT/.test(r.cls || '') || /^(tour-de-france|giro-d-italia|vuelta-a-espana)$/.test(r.hk);
+  function raceCat(eds) {
+    const c = eds.map(e => e.r.cls || '').join(' ');
+    const k = eds[0].r.hk;
+    if (/GT/.test(c) || /^(tour-de-france|giro-d-italia|vuelta-a-espana)$/.test(k)) return 'gv';
+    if (/1\.WT1/.test(c)) return 'mon';
+    if (/WC\.|OG\./.test(c)) return 'mun';
+    if (/NC\./.test(c)) return 'nac';
+    if (/2\.(UWT|WT)/.test(c)) return 'wte';
+    if (/1\.(UWT|WT)/.test(c)) return 'wtc';
+    if (/Pro/.test(c)) return 'pro';
+    return 'otr';
+  }
+  const CAT = { gv: 'Grandes Vueltas', mon: 'Monumentos', mun: 'Mundiales y JJOO', wte: 'Vueltas WorldTour', wtc: 'Clásicas WorldTour', pro: 'ProSeries', nac: 'Campeonatos', otr: 'Resto de carreras' };
+  const CAT_ORDER = ['gv', 'mon', 'mun', 'wte', 'wtc', 'pro', 'nac', 'otr'];
+  const podiumOf = r => (r.multi && r.cl.GC && r.cl.GC.length ? r.cl.GC : (r.st[r.st.length - 1] || { rows: [] }).rows).filter(x => x[1] >= 0).slice(0, 3);
+
+  let HX = null;
+  function history() {
+    if (HX && HX.ix === IX) return HX;
+    const groups = new Map();
+    for (const ev of IX.events) {
+      const r = ev.race;
+      if (!r || !r.st.length || !winnerOf(r)) continue;
+      if (r.multi && ev.end && ev.end >= TODAY && status(ev).k === 'live') continue; // aún en curso
+      r.hk = r.hk || raceKey(r.name, r.cls);
+      if (!groups.has(r.hk)) groups.set(r.hk, { key: r.hk, eds: [] });
+      groups.get(r.hk).eds.push({ ev, r, s: r.s });
+    }
+    const races = [];
+    for (const g of groups.values()) {
+      g.eds.sort((a, b) => a.s - b.s || a.r.start.localeCompare(b.r.start));
+      const last = g.eds[g.eds.length - 1];
+      g.name = last.r.name; g.cat = raceCat(g.eds); g.multi = g.eds.some(e => e.r.multi); g.cls = last.r.cls;
+      g.wins = new Map(); g.pods = new Map(); g.stw = new Map(); g.ld = new Map();
+      const push = (m, rid, v) => { if (!m.has(rid)) m.set(rid, []); m.get(rid).push(v); };
+      for (const e of g.eds) {
+        e.pod = podiumOf(e.r); e.w = e.pod[0];
+        if (e.w) push(g.wins, e.w[1], e);
+        e.pod.forEach((x, i) => push(g.pods, x[1], { e, p: i + 1 }));
+        if (e.r.multi) e.r.st.forEach((s, si) => { const w = s.rows[0]; if (w && w[0] === 1 && w[1] >= 0) push(g.stw, w[1], { e, si }); });
+        if (e.r.ld) Object.values(e.r.ld).forEach(rid => rid >= 0 && push(g.ld, rid, e));
+      }
+      g.rec = [...g.wins.entries()].sort((a, b) => b[1].length - a[1].length || a[1][0].s - b[1][0].s);
+      g.slug = g.key;
+      races.push(g);
+    }
+    races.sort((a, b) => CAT_ORDER.indexOf(a.cat) - CAT_ORDER.indexOf(b.cat) || b.eds.length - a.eds.length || a.name.localeCompare(b.name));
+    HX = { ix: IX, races, byKey: new Map(races.map(g => [g.key, g])) };
+    return HX;
+  }
+  const hlink = (g, label) => `<a class="el" href="#historia-${g.slug}">${esc(label || g.name)}</a>`;
+  const yearsOf = list => list.map(e => `<a href="#carrera-${e.ev.id}">${e.s}</a>`).join(', ');
+
+  function pageMiticas() {
+    setTitle('Carreras míticas'); setNav('miticas'); state.rs = -1;
+    const H = history();
+    const cat = state.histCat || 'top';
+    const shown = H.races.filter(g => cat === 'top' ? ['gv', 'mon', 'mun'].includes(g.cat) : cat === 'all' ? true : g.cat === cat);
+    const card = g => {
+      const rec = g.rec[0]; const n = rec ? rec[1].length : 0;
+      const holders = g.rec.filter(x => x[1].length === n);
+      const lastE = g.eds[g.eds.length - 1];
+      return `<section class="card mt"><div class="mt-h">${hlink(g)} ${clsBadge(g.cls)}</div>
+        <p class="muted small">${g.eds.length} edición${g.eds.length > 1 ? 'es' : ''} en MC · ${g.eds[0].s}–${lastE.s}</p>
+        <ol class="mt-w">${g.eds.slice().reverse().map(e => `<li><span class="li-date">${e.s}</span>${e.w ? rlink(e.w[1]) : '—'}<span class="muted small">${e.w ? esc(tname(e.w[2])) : ''}</span></li>`).join('')}</ol>
+        ${n > 1 ? `<p class="mt-rec"><span class="rec">Récord</span> ${holders.map(([rid, l]) => `${rlink(rid)} <span class="muted small">(${yearsOf(l)})</span>`).join(' · ')} con <strong>${n}</strong> victorias</p>` : `<p class="mt-rec muted small">Nadie la ha ganado dos veces todavía.</p>`}
+      </section>`;
+    };
+    const opts = [['top', 'Míticas'], ...CAT_ORDER.filter(k => !['nac', 'otr'].includes(k)).map(k => [k, CAT[k]]), ['all', 'Todas']];
+    const table = list => `<section class="card"><div class="tw"><table class="t t-rank" data-filter><thead><tr><th>Carrera</th><th class="n">Ediciones</th><th>Último ganador</th><th>Récord de victorias</th></tr></thead><tbody>${list.map(g => { const l = g.eds[g.eds.length - 1]; const rec = g.rec[0]; const n = rec ? rec[1].length : 0; return `<tr><td>${hlink(g)} ${clsBadge(g.cls)}</td><td class="n">${g.eds.length}</td><td>${l.w ? rlink(l.w[1]) : ''} <span class="muted small">${l.s}</span></td><td>${n > 1 ? g.rec.filter(x => x[1].length === n).map(([rid]) => rlink(rid)).join(', ') + ` <strong>${n}</strong>` : '<span class="muted small">—</span>'}</td></tr>`; }).join('')}</tbody></table></div></section>`;
+    const body = cat === 'top' || cat === 'gv' || cat === 'mon' || cat === 'mun'
+      ? `<div class="mts">${shown.map(card).join('')}</div>`
+      : `<div class="filter"><input id="tfilter" type="search" placeholder="Buscar carrera o corredor" aria-label="Filtrar carreras"></div>${table(shown)}`;
+    return `<header class="ph"><div class="ph-meta"><span class="eyebrow">Historia de MC · ${IX.seasons[IX.seasons.length - 1]}–${IX.seasons[0]}</span></div><h1 class="h1">Carreras míticas</h1>
+      <p class="muted">Palmarés de cada carrera en todas las temporadas de Managercycling: quién la ha ganado, cuándo y quién tiene el récord de victorias. <a href="#hitos">Ver los hitos y récords de MC</a></p></header>
+      <div class="seg seg-wide">${opts.map(([k, l]) => `<a href="#miticas" data-hcat="${k}" class="${cat === k ? 'on' : ''}">${l}</a>`).join('')}</div>
+      ${body}`;
+  }
+
+  function pageHistoria(key) {
+    const H = history();
+    const g = H.byKey.get(key);
+    if (!g) return notFound('No encuentro el historial de esa carrera.');
+    setTitle(g.name + ' · historial'); setNav('miticas'); state.rs = -1;
+    const rows = g.eds.slice().reverse().map(e => {
+      const r = e.r, p = e.pod;
+      const jer = r.multi ? ['PTS', 'KOM', 'YOU'].map(k => r.cl[k] && r.cl[k][0] && r.cl[k][0][1] >= 0 ? `<span class="chip">${jersey(k)}${rlink(r.cl[k][0][1])}</span>` : '').join('') : '';
+      return `<tr><td><a href="#carrera-${e.ev.id}">${e.s}</a></td><td class="rider">${p[0] ? rlink(p[0][1]) + `<div class="sub">${tlink(p[0][2])}</div>` : '—'}</td><td>${p[1] ? rlink(p[1][1]) : ''}</td><td>${p[2] ? rlink(p[2][1]) : ''}</td>${g.multi ? `<td class="small hj">${jer}</td>` : ''}</tr>`;
+    }).join('');
+    const board = (title, m, unit, fmtYears) => {
+      const l = [...m.entries()].sort((a, b) => b[1].length - a[1].length).slice(0, 10);
+      if (!l.length) return '';
+      return `<section class="card"><h2 class="h2">${title}</h2><ol class="lb">${l.map(([rid, list], i) => `<li><span class="lb-p">${i + 1}</span><span>${rlink(rid)}<div class="sub muted small">${fmtYears(list)}</div></span><span class="lb-v">${list.length}${unit}</span></li>`).join('')}</ol></section>`;
+    };
+    const ys = l => [...new Set(l.map(x => (x.e || x).s))].join(', ');
+    const podYears = l => l.map(x => `${x.e.s} (${x.p}º)`).join(', ');
+    const stYears = l => { const by = new Map(); l.forEach(x => by.set(x.e.s, (by.get(x.e.s) || 0) + 1)); return [...by].map(([y, n]) => n > 1 ? `${y} ×${n}` : y).join(', '); };
+    const ldYears = l => { const by = new Map(); l.forEach(e => by.set(e.s, (by.get(e.s) || 0) + 1)); return [...by].map(([y, n]) => `${y}: ${n}`).join(', '); };
+    const rec = g.rec[0], n = rec ? rec[1].length : 0;
+    // equipos con más victorias
+    const tw = new Map(); g.eds.forEach(e => { if (e.w && e.w[2] >= 0) tw.set(e.w[2], (tw.get(e.w[2]) || 0) + 1); });
+    const teamTop = [...tw.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
+    return `<header class="ph"><div class="ph-meta"><span class="eyebrow">${esc(CAT[g.cat])}</span>${clsBadge(g.cls)}<a class="small" href="#miticas">Todas las carreras</a></div>
+        <h1 class="h1">${esc(g.name)}</h1>
+        <p class="muted">${g.eds.length} ediciones en MC (${g.eds[0].s}–${g.eds[g.eds.length - 1].s}) · ${g.wins.size} ganadores distintos</p></header>
+      <div class="kpis">
+        <div class="kpi"><span class="kpi-v">${n || 0}</span><span class="kpi-l">Récord de victorias</span><span class="kpi-s">${n > 1 ? g.rec.filter(x => x[1].length === n).map(([rid, l]) => esc(rname(rid)) + ' (' + l.map(e => e.s).join(', ') + ')').join(' · ') : 'sin repetidores'}</span></div>
+        <div class="kpi"><span class="kpi-v">${g.eds.length}</span><span class="kpi-l">Ediciones</span></div>
+        ${g.multi ? `<div class="kpi"><span class="kpi-v">${g.eds.reduce((a, e) => a + (e.r.multi ? e.r.st.length : 0), 0)}</span><span class="kpi-l">Etapas disputadas</span></div>` : ''}
+      </div>
+      <div class="grid g-rider"><div class="col">
+        <section class="card"><h2 class="h2">Palmarés</h2><div class="tw"><table class="t t-rank t-hist"><thead><tr><th>Año</th><th>Ganador</th><th>2º</th><th>3º</th>${g.multi ? '<th class="hj">Maillots</th>' : ''}</tr></thead><tbody>${rows}</tbody></table></div></section>
+      </div><aside class="col">
+        ${board('Más victorias', g.wins, '', ys)}
+        ${board('Más podios', g.pods, '', podYears)}
+        ${g.multi ? board('Más etapas ganadas', g.stw, '', stYears) : ''}
+        ${g.multi ? board('Más días de líder', g.ld, '', ldYears) : ''}
+        ${teamTop.length ? `<section class="card"><h2 class="h2">Equipos con más victorias</h2><ol class="lb">${teamTop.map(([tid, k], i) => `<li><span class="lb-p">${i + 1}</span>${tlink(tid)}<span class="lb-v">${k}</span></li>`).join('')}</ol></section>` : ''}
+      </aside></div>`;
+  }
+
+  function pageHitos() {
+    setTitle('Hitos de MC'); setNav('hitos'); state.rs = -1;
+    const H = history();
+    const gv = H.races.filter(g => g.cat === 'gv'), mon = H.races.filter(g => g.cat === 'mon');
+    const cnt = (list, f) => { const m = new Map(); list.forEach(g => g.eds.forEach(e => { const v = f(e, g); if (v) (Array.isArray(v) ? v : [v]).forEach(([rid, x]) => { if (rid < 0) return; if (!m.has(rid)) m.set(rid, []); m.get(rid).push(x); }); })); return [...m.entries()].sort((a, b) => b[1].length - a[1].length); };
+    const gcGV = cnt(gv, e => e.w && [[e.w[1], { e, g: e }]]);
+    const stGV = cnt(gv, e => e.r.st.map(s => s.rows[0] && s.rows[0][0] === 1 ? [s.rows[0][1], e] : null).filter(Boolean));
+    const monW = cnt(mon, e => e.w && [[e.w[1], e]]);
+    const gvByRider = new Map(); gv.forEach(g => g.eds.forEach(e => { if (!e.w) return; const rid = e.w[1]; if (!gvByRider.has(rid)) gvByRider.set(rid, new Map()); gvByRider.get(rid).set(g.key, (gvByRider.get(rid).get(g.key) || []).concat(e)); }));
+    const triple = [...gvByRider.entries()].filter(([, m]) => ['tour-de-france', 'giro-d-italia', 'vuelta-a-espana'].every(k => m.has(k)));
+    const doubles = []; { const bySeason = new Map(); gv.forEach(g => g.eds.forEach(e => { if (!e.w) return; const k = e.s + ':' + e.w[1]; if (!bySeason.has(k)) bySeason.set(k, []); bySeason.get(k).push(g); })); for (const [k, l] of bySeason) if (l.length > 1) doubles.push({ y: +k.split(':')[0], rid: +k.split(':')[1], l }); }
+    // victorias y puntos por temporada
+    const seasonRows = []; for (const [y, st] of IX.season) for (const [rid, o] of st.riders) seasonRows.push({ y, rid, o });
+    const topBy = (f, n = 10) => seasonRows.filter(x => f(x.o) > 0).sort((a, b) => f(b.o) - f(a.o)).slice(0, n);
+    const teamRows = []; for (const [y, st] of IX.season) for (const [tid, o] of st.teams) if (tid >= 0) teamRows.push({ y, tid, o });
+    // más etapas en una sola carrera
+    const stOne = []; H.races.forEach(g => g.eds.forEach(e => { if (!e.r.multi) return; const m = new Map(); e.r.st.forEach(s => { const w = s.rows[0]; if (w && w[0] === 1 && w[1] >= 0) m.set(w[1], (m.get(w[1]) || 0) + 1); }); for (const [rid, k] of m) if (k >= 3) stOne.push({ rid, k, e, g }); }));
+    stOne.sort((a, b) => b.k - a.k || (isGT(b.e.r) - isGT(a.e.r)));
+    // récord de victorias en una misma carrera
+    const sameRace = [], sameNac = []; H.races.forEach(g => g.wins.forEach((l, rid) => { if (l.length >= 2) (g.cat === 'nac' ? sameNac : sameRace).push({ rid, l, g }); }));
+    sameNac.sort((a, b) => b.l.length - a.l.length);
+    sameRace.sort((a, b) => b.l.length - a.l.length || CAT_ORDER.indexOf(a.g.cat) - CAT_ORDER.indexOf(b.g.cat));
+    // rachas: victorias consecutivas en la misma carrera
+    const streaks = []; H.races.filter(g => g.cat !== 'nac').forEach(g => { let cur = null, run = []; g.eds.forEach(e => { const rid = e.w ? e.w[1] : null; if (rid === cur && run.length && e.s === run[run.length - 1].s + 1) run.push(e); else { if (run.length >= 2) streaks.push({ rid: cur, run, g }); cur = rid; run = [e]; } }); if (run.length >= 2) streaks.push({ rid: cur, run, g }); });
+    streaks.sort((a, b) => b.run.length - a.run.length || CAT_ORDER.indexOf(a.g.cat) - CAT_ORDER.indexOf(b.g.cat));
+    // carreras distintas ganadas
+    const distinct = new Map(); H.races.forEach(g => g.wins.forEach((l, rid) => distinct.set(rid, (distinct.get(rid) || 0) + 1)));
+    const distinctTop = [...distinct.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10);
+    // campeones del mundo / JJOO
+    const champs = H.races.filter(g => g.cat === 'mun');
+    const career = new Map(); for (const [, st] of IX.season) for (const [rid, o] of st.riders) { const c = career.get(rid) || { wins: 0, pts: 0, lead: 0 }; c.wins += o.wins; c.pts += o.pts; c.lead += o.lead; career.set(rid, c); }
+    const careerTop = k => [...career.entries()].filter(([, c]) => c[k] > 0).sort((a, b) => b[1][k] - a[1][k]).slice(0, 10);
+
+    const lb = (title, items, note = '') => `<section class="card"><h2 class="h2">${title}</h2>${note ? `<p class="muted small">${note}</p>` : ''}<ol class="lb">${items.length ? items.join('') : '<li class="empty">Aún no ha pasado.</li>'}</ol></section>`;
+    const li = (i, who, sub, v) => `<li><span class="lb-p">${i + 1}</span><span>${who}${sub ? `<div class="sub muted small">${sub}</div>` : ''}</span><span class="lb-v">${v}</span></li>`;
+    const evY = e => `<a href="#carrera-${e.ev.id}">${e.s}</a>`;
+    const short = g => esc(g.name.replace(/^La Vuelta ciclista a España$/i, 'Vuelta').replace(/^Giro d.?Italia$/i, 'Giro').replace(/^Tour de France$/i, 'Tour'));
+    const tied = (list, n, f) => { const l = list.filter(x => f(x) === n); return l.length > 1 ? `${rlink(l[0][0] ?? l[0].rid)} <span class="muted small">y ${l.length - 1} más</span>` : rlink(l[0][0] ?? l[0].rid); };
+    const cTop = careerTop('wins');
+    const hero = [
+      gcGV[0] ? ['Rey de las Grandes Vueltas', tied(gcGV, gcGV[0][1].length, x => x[1].length), `${gcGV[0][1].length} generales`] : null,
+      monW[0] ? ['Más Monumentos', tied(monW, monW[0][1].length, x => x[1].length), `${monW[0][1].length} victorias`] : null,
+      cTop[0] ? ['Más victorias en MC', rlink(cTop[0][0]), `${cTop[0][1].wins} victorias`] : null,
+      sameRace[0] ? ['Récord en una carrera', rlink(sameRace[0].rid), `${sameRace[0].l.length} × ${short(sameRace[0].g)}`] : null,
+    ].filter(Boolean);
+    return `<header class="ph"><div class="ph-meta"><span class="eyebrow">Historia de MC · ${IX.seasons[IX.seasons.length - 1]}–${IX.seasons[0]}</span></div><h1 class="h1">Hitos y récords de MC</h1>
+        <p class="muted">Los récords de todas las temporadas de Managercycling. <a href="#miticas">Ver el palmarés de cada carrera</a></p></header>
+      <div class="kpis">${hero.map(([l, who, v]) => `<div class="kpi kpi-rec"><span class="kpi-l">${l}</span><span class="kpi-who">${who}</span><span class="kpi-s">${v}</span></div>`).join('')}</div>
+      <div class="boards">
+        ${lb('Más Grandes Vueltas', gcGV.slice(0, 10).map(([rid, l], i) => li(i, rlink(rid), l.map(x => `${short(H.byKey.get(x.e.r.hk))} ${evY(x.e)}`).join(' · '), l.length)))}
+        ${lb('Triple corona', triple.map(([rid, m], i) => li(i, rlink(rid), ['giro-d-italia', 'tour-de-france', 'vuelta-a-espana'].map(k => short(H.byKey.get(k)) + ' ' + m.get(k).map(evY).join(', ')).join(' · '), '3/3')), 'Ganadores de Giro, Tour y Vuelta')}
+        ${lb('Dobletes en una temporada', doubles.sort((a, b) => b.l.length - a.l.length || b.y - a.y).map((d, i) => li(i, rlink(d.rid), d.l.map(short).join(' + '), d.y)), 'Dos o más Grandes Vueltas el mismo año')}
+        ${lb('Más Monumentos', monW.slice(0, 10).map(([rid, l], i) => li(i, rlink(rid), l.map(e => `${short(H.byKey.get(e.r.hk))} ${evY(e)}`).join(' · '), l.length)))}
+        ${lb('Más etapas en Grandes Vueltas', stGV.slice(0, 10).map(([rid, l], i) => li(i, rlink(rid), '', l.length)))}
+        ${lb('Más etapas en una sola carrera', stOne.slice(0, 10).map((x, i) => li(i, rlink(x.rid), `${hlink(x.g)} ${evY(x.e)}`, x.k)))}
+        ${lb('Más victorias en una misma carrera', sameRace.slice(0, 12).map((x, i) => li(i, rlink(x.rid), `${hlink(x.g)} · ${yearsOf(x.l)}`, x.l.length)))}
+        ${lb('Campeonatos: más títulos', sameNac.slice(0, 10).map((x, i) => li(i, rlink(x.rid), `${hlink(x.g)} · ${yearsOf(x.l)}`, x.l.length)))}
+        ${lb('Victorias seguidas en la misma carrera', streaks.slice(0, 10).map((x, i) => li(i, rlink(x.rid), `${hlink(x.g)} · ${x.run[0].s}–${x.run[x.run.length - 1].s}`, x.run.length)))}
+        ${lb('Más victorias en una temporada', topBy(o => o.wins).map((x, i) => li(i, rlink(x.rid), `${x.y} · ${tname(x.o.lastT) ? esc(tname(x.o.lastT)) : ''}`, x.o.wins)))}
+        ${lb('Más puntos MC en una temporada', topBy(o => o.pts).map((x, i) => li(i, rlink(x.rid), String(x.y), fmtN(x.o.pts))), 'Los baremos de puntos han cambiado entre temporadas')}
+        ${lb('Más victorias en MC', careerTop('wins').map(([rid, c], i) => li(i, rlink(rid), '', c.wins)), 'Etapas, clásicas y generales')}
+        ${lb('Más carreras distintas ganadas', distinctTop.map(([rid, k], i) => li(i, rlink(rid), '', k)))}
+        ${lb('Más días de líder', careerTop('lead').map(([rid, c], i) => li(i, rlink(rid), '', c.lead)))}
+        ${lb('Equipos: más victorias en una temporada', teamRows.filter(x => x.o.wins).sort((a, b) => b.o.wins - a.o.wins).slice(0, 10).map((x, i) => li(i, tlink(x.tid), String(x.y), x.o.wins)))}
+        ${lb('Equipos: más puntos MC en una temporada', teamRows.filter(x => x.o.pts || x.o.rpts).sort((a, b) => (b.o.pts || b.o.rpts) - (a.o.pts || a.o.rpts)).slice(0, 10).map((x, i) => li(i, tlink(x.tid), String(x.y), fmtN(x.o.pts || x.o.rpts))))}
+        ${champs.map(g => lb(esc(g.name), g.eds.slice().reverse().map((e, i) => `<li><span class="lb-p lb-y">${e.s}</span><span>${e.w ? rlink(e.w[1]) : '—'}<div class="sub muted small">${e.w ? esc(tname(e.w[2])) : ''}</div></span><span class="lb-v"><a class="small" href="#carrera-${e.ev.id}">ver</a></span></li>`))).join('')}
+      </div>`;
+  }
+
   function pageAbout() {
     setTitle('Cómo funciona'); setNav('');
     const g = D.generated ? new Date(D.generated) : null;
@@ -1594,7 +1966,8 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
       <p>ManagerCycling Stats lee los temas del foro <a href="${FORUM}" target="_blank" rel="noopener">Managercycling</a>: los resultados de cada carrera (sección RESULTADOS) y las inscripciones de los mánagers (sección INSCRIPCIONES), y los ordena por corredor, equipo y carrera.</p>
       <p>Los <strong>puntos MC</strong> son los puntos Managercycling que el foro publica en el resumen de cada carrera (etapas, clásicas y clasificaciones finales). Los <strong>tiempos</strong> salen de las clasificaciones completas de cada etapa.</p>
       <p>Datos guardados: ${g ? g.toLocaleString('es-ES') : 'sin fecha'}. Temporadas: ${IX.seasons.slice().reverse().join(', ')}. Cuando la web está publicada fuera de Claude, al abrirla comprueba el foro y añade los temas nuevos o actualizados.</p>
-      <p>Cada corredor puede competir como máximo <strong>${MAX_DAYS} días por temporada</strong>. En las fichas y en el ranking se muestran los días ya corridos y, aparte, los de las carreras en las que su mánager ya lo ha inscrito; en rojo si la suma supera el máximo.</p>
+      <p>Los puntos de cada corredor incluyen etapas, clásicas, clasificaciones finales, los puntos por ir de líder y su parte de las contrarrelojes por equipos (los puntos del equipo se reparten entre sus corredores). Los <strong>puntos de equipo</strong> son la suma de los de sus corredores más la clasificación por equipos.</p>
+      <p>Cada corredor puede competir como máximo <strong>${MAX_DAYS} días por temporada</strong>. Una clásica cuenta un día; en una vuelta cuentan las etapas que disputa, incluida aquella en la que abandona, y un doble sector cuenta como un solo día. En las fichas y en el ranking se muestran los días ya corridos y, aparte, los de las carreras en las que su mánager ya lo ha inscrito; en rojo si la suma supera el máximo.</p>
       <p>Las marcas <span class="jb">J</span> indican corredores en la clasificación de jóvenes, tal como aparecen en el foro con «(J)».</p>
     </section>`;
   }
@@ -1617,6 +1990,9 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
       case 'ranking': html = pageRanking(); break;
       case 'stats': html = pageStats(); break;
       case 'info': html = pageAbout(); break;
+      case 'miticas': html = pageMiticas(); break;
+      case 'historia': html = pageHistoria(arg); break;
+      case 'hitos': html = pageHitos(); break;
       default: html = pageHome();
     }
     const main = $('#main');
@@ -1647,12 +2023,13 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
     if (ds.cal) state.calFilter = ds.cal;
     if (ds.rank) state.rankMode = ds.rank;
     if (ds.scope) state.statsScope = ds.scope;
+    if (ds.hcat) state.histCat = ds.hcat;
     const target = a.getAttribute('href');
-    if (target && target.startsWith('#') && target === location.hash && (ds.tab !== undefined || ds.season || ds.cal || ds.rank || ds.scope || ds.hl !== undefined)) { e.preventDefault(); state.scrollTop = ds.tab !== undefined ? false : true; if (ds.tab !== undefined) state.scrollTop = false; route(); }
-    else if (target && target.startsWith('#') && (ds.tab !== undefined || ds.season || ds.cal || ds.rank || ds.scope)) state.scrollTop = !(ds.tab !== undefined);
+    if (target && target.startsWith('#') && target === location.hash && (ds.tab !== undefined || ds.season || ds.cal || ds.rank || ds.scope || ds.hcat || ds.hl !== undefined)) { e.preventDefault(); state.scrollTop = ds.tab !== undefined ? false : true; if (ds.tab !== undefined) state.scrollTop = false; route(); }
+    else if (target && target.startsWith('#') && (ds.tab !== undefined || ds.season || ds.cal || ds.rank || ds.scope || ds.hcat)) state.scrollTop = !(ds.tab !== undefined);
   });
   document.addEventListener('change', e => {
-    if (e.target.id === 'season') { state.season = +e.target.value; ls.set('mcs.season', state.season); state.riderSeason = null; route(); }
+    if (e.target.id === 'season') { state.userSeason = true; state.season = +e.target.value; ls.set('mcs.season', state.season); state.riderSeason = null; route(); }
     if (e.target.id === 'onlyJ') { state.rankJ = e.target.checked; route(); }
   });
   window.addEventListener('hashchange', route);
