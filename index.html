@@ -315,6 +315,8 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
 .kpi-rec .kpi-who { font-family: var(--f-display); font-size: 22px; font-weight: 700; line-height: 1.15; }
 .lb .sub { white-space: normal; }
 .lb-p.lb-y { width: 40px; }
+.perfil a { display: block; margin-top: 8px; border-radius: 8px; overflow: hidden; border: 1px solid var(--line); background: var(--surface-2); }
+.perfil img { display: block; width: 100%; height: auto; }
 @media (max-width: 640px) { .t-hist .hj { display: none; } }
 </style>
 
@@ -357,7 +359,7 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
     let note = null;
     const nm = t.match(/^(.*?)\s*\(([^)]*)\)\s*$/);
     if (nm && /\d{4}/.test(nm[1])) { t = nm[1]; note = nm[2]; }
-    const m = t.match(/^(\d{1,2})[\/.](\d{1,2})[\/.](\d{4})(?:\s*[-–]?\s*(\d{1,2})[\/.](\d{1,2})[\/.](\d{4}))?\s+(.+)$/);
+    const m = t.match(/^(\d{1,2})[\/.](\d{1,2})[\/.](\d{4})\d?(?:\s*[-–]?\s*(\d{1,2})[\/.](\d{1,2})[\/.](\d{4})\d?)?\s+(.+)$/);
     if (!m) return { name: t, start: null, end: null, country: null, cls: null, note };
     const d = (a, b, c) => `${c}-${String(b).padStart(2, '0')}-${String(a).padStart(2, '0')}`;
     let parts = m[7].split(' '), cls = null, country = null;
@@ -375,7 +377,7 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
 
   // ---------- headers ----------
   const SEC = [
-    ['TOTR', /^total(es)? (ciclistas|corredores)$/],
+    ['TOTR', /^(total(es)? (ciclistas|corredores)|(total |puntos )?por (ciclista|corredor)(es|s)?|ciclistas|corredores)$/],
     ['TOT', /^(total|totales|puntos totales|total equipos|puntos equipos|puntos por equipos?|presupuesto)$/],
     ['GC', /^(general|resto de general|resto general|clasificacion general|general final|rojo|maillot rojo|rosa|maglia rosa|jaune|maillot jaune|amarillo|maillot amarillo|lider|gc)$/],
     ['PTS', /^(puntos|regularidad|clasificacion por puntos|ciclamino|maglia ciclamino|vert|maillot vert|verde|maillot verde|points)$/],
@@ -466,7 +468,7 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
   // Learn team names from tabbed rows (unambiguous) across many topics.
   function learnTeams(topics, idx) {
     for (const x of topics) for (const p of x.posts) for (const l of p.L) {
-      if (l.indexOf('\t') < 0) continue;
+      if (l.indexOf('\t') < 0 || /^\s*(spoiler:\s*)?l[ií]der\b/i.test(l)) continue;
       const c = l.split('\t').map(norm).filter(Boolean);
       const okTeam = x => x && /[A-Za-z]{2}/.test(x) && !x.split(' ').every(isValTok) && !/^[+(]/.test(x);
       if (c.length >= 4 && /^\d+$/.test(c[0]) && okTeam(c[2]) && okTeam(c[1])) idx.add(c[2]);
@@ -484,6 +486,9 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
     // "Etapa 19 1 Tobias Halland Johannessen Lidl-Trek 480" → header + row
     const g = l.match(/^((?:etapa|stage)\s*\d+\s*(?:\.?\s*[ab](?![a-z]))?|pr[oó]logo)[\t ]+(\d+[.º]?[\t ]+\D.*)$/i);
     if (g) return [norm(g[1]), g[2]];
+    // "Jóvenes 1 Lennert Van Eetvelt (J) Uno-X Mobility 60" → header + first row
+    const h = l.match(/^([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ .]{2,30}?)[\t ]+(1[.º]?[\t ]+\D.*)$/);
+    if (h && (sectionOf(h[1]) || stageCtx(h[1]))) return [norm(h[1]), h[2]];
     const m = l.match(/^([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9() ]{2,30}?):+\s*(\d+[\t ].*)$/);
     if (m) return [m[1], m[2]];
     const t = l.match(/^([^\t\d][^\t]{1,40}?)\t+(\d+\t.*)$/);
@@ -542,7 +547,7 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
       }
       if (groups.length === 2 && groups[0] === 't' && groups[1] === 'n') { pts0 = toNum(toks.pop()); vals = toks.join(' '); }
     }
-    if (rider && /^[a-zà-ÿ]/.test(norm(rider)) && !/^(de|del|van|von|da|di|le|la)\s/i.test(norm(rider))) return null; // narrative text, not a rider
+    if (rider && /^[a-zà-ÿ]/.test(norm(rider)) && (!/^(de|del|van|von|da|di|le|la)\s/i.test(norm(rider)) || !/(^|\s)[A-ZÀ-Ý]/.test(norm(rider)))) return null; // narrative text, not a rider
     return { p: pos, r: rider ? norm(rider) : null, t: team ? (teams.get(team) || norm(team)) : null, v: vals.slice(0, 40), one, timey, pts0 };
   }
 
@@ -553,12 +558,23 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
       if (!p.L || !p.L.length || /contenido patrocinado/i.test(p.a || '')) return;
       let ctx = null, ctxInfo = null, sec = null, cur = null, lastPos = null;
       const start = (s) => { cur = { post: pi, ctx, ctxInfo, sec: s, rows: [] }; blocks.push(cur); lastPos = null; };
-      for (const raw of p.L) {
+      // two rows glued on one line: "4  Guillaume Martin  Quick-Step  84  5  Tony Gallopin  W52  74"
+      const lines = [];
+      for (const l of p.L) {
+        let rest = l, m;
+        while ((m = rest.match(/^(\s*\d+\t+[^\t\d][^\t]*\t+[^\t\d][^\t]*\t+[\d.,]+)\t+(\d+\t+[^\t\d][^\t]*\t+[^\t\d][^\t]*\t+[\d.,]+.*)$/))) { lines.push(m[1]); rest = m[2]; }
+        lines.push(rest);
+      }
+      for (const raw of lines) {
         const lr = raw.replace(/^\s*spoiler:\s*/i, '');
         if (/^\s*l[íi]der\b/i.test(lr)) {
           // "Líder Remco Evenepoel (J)  Team Flanders - Baloise  96": puntos MC por ir líder tras la etapa
           const rest = lr.replace(/^\s*l[íi]der\s*:?\s*/i, '');
           const r = /\d\s*$/.test(rest) ? parseRow(rest, 'R', teams) : null;
+          if (!r && ctx != null) { // "Líder Maximilian Schachmann 48" (sin equipo)
+            const m = norm(rest).match(/^([A-ZÀ-Ý][^\d\t]{3,60}?)\s+(\d[\d.,]*)$/);
+            if (m) { const sp = teams.splitEnd(m[1]); leaderPts.set(ctx, { p: ctx, r: sp && sp[0] ? sp[0] : m[1], t: sp ? sp[1] : null, v: m[2], one: toNum(m[2]) }); continue; }
+          }
           if (r && r.one == null && /^[\d. ]+$/.test(r.v || '')) { const t = r.v.split(' ').pop(); if (NUM_TOK.test(t)) { r.one = toNum(t); r.v = t; } }
           if (r && r.r && r.one != null && ctx != null) leaderPts.set(ctx, r);
           continue;
@@ -600,19 +616,33 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
           if (!r) { if (log) log('row?', l); continue; }
           if (!cur || cur.sec !== s) { sec = s; start(s); }
           // a classification list that restarts at 1 without a header is another classification
-          else if (r.p === 1 && lastPos >= 3 && ['GC', 'PTS', 'KOM', 'YOU', 'TEAM'].includes(s)) { sec = s = 'UNK'; start(s); }
+          else if (r.p === 1 && lastPos >= 3 && ['GC', 'PTS', 'KOM', 'YOU', 'TEAM', 'UNK'].includes(s)) { sec = s = 'UNK'; start(s); }
           // a results list followed by a headerless young riders' list: "1 Jasper Philipsen (J) ..."
           else if (r.p === 1 && lastPos >= 3 && s === 'R' && r.r && /\(J\)/i.test(r.r)) { sec = s = 'YOU'; start(s); }
+          // another list without header after the results (general, points...): keep it apart
+          else if (r.p === 1 && lastPos >= 3 && s === 'R') { if (r.r) { sec = s = 'UNK'; start(s); } else start(s); }
           if (r.p == null) { r.np = 1; r.p = lastPos || 1; } else lastPos = r.p;
           cur.rows.push(r);
         }
       }
     });
-    const out = blocks.filter(b => b.rows.length);
+    let out = blocks.filter(b => b.rows.length);
+    // "Resto de general": a list split in two that goes on where the previous one stopped
+    out = out.filter((b, i) => {
+      const prev = out[i - 1];
+      if (i > 0 && prev.post === b.post && prev.sec === b.sec && prev.ctx === b.ctx && b.rows[0].p > 1 && b.rows[0].p === prev.rows[prev.rows.length - 1].p + 1) { prev.rows.push(...b.rows); b.rows = prev.rows; out[i] = prev; return false; }
+      return true;
+    });
     out.leaderPts = leaderPts;
+    // "Equipos" followed by "Team<TAB>1.748" lines without positions: the team totals of the race
+    out.forEach(b => { if (b.sec === 'TEAM' && b.rows.length >= 6 && b.rows.every(r => !r.r && r.t && r.np && r.one != null) && (b.rows.length >= 12 || out.filter(o => o.post === b.post).length === 1)) b.sec = 'TOT'; });
     out.forEach((b, i) => { if (b.sec === 'NP') b.sec = i > 0 && out[i - 1].post === b.post && b.rows.every(r => /\(J\)/i.test(r.r || '')) ? 'YOU' : 'R'; });
     out.forEach(b => {
       if (b.sec === 'UNK' && b.rows.length && b.rows.every(r => r.r && /\(J\)/i.test(r.r))) { b.sec = 'YOU'; return; }
+      if (b.sec === 'UNK' && b.rows.filter(r => r.timey).length > b.rows.length / 2) {
+        const have = new Set(out.filter(o => o.post === b.post && o.ctx === b.ctx).map(o => o.sec));
+        if (!have.has('GC')) { b.sec = 'GC'; return; }
+      }
       if (b.sec !== 'UNK' || b.rows.some(r => r.timey)) return;
       const have = new Set(out.filter(o => o.post === b.post && o.ctx === b.ctx).map(o => o.sec));
       const guess = ['PTS', 'KOM'].find(k => !have.has(k));
@@ -620,6 +650,7 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
     });
     // Summary posts written as "1  Rider  Team  0  72": a constant first column, MC points last
     const timedPost = new Set(out.filter(b => b.rows.some(r => r.timey)).map(b => b.post));
+    out.forEach(b => { b.tp = timedPost.has(b.post); });
     out.forEach(b => {
       if (timedPost.has(b.post)) return;
       if (b.rows.some(r => r.one != null)) {
@@ -657,7 +688,8 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
     const out = base.map(r => ({ ...r, pts: base.isPts ? r.one : (r.pts0 ?? null) }));
     const m = new Map(out.map(r => [rk(r), r]));
     let usedP = base.isPts;
-    const ordered = (others || []).slice().sort((a, b) => (isPointsBlock(b) && isPointsBlock(a) ? b.rows.length - a.rows.length : 0));
+    // points published in a summary post (no times in it) win over a standings list that only looks like points
+    const ordered = (others || []).slice().sort((a, b) => (isPointsBlock(b) && isPointsBlock(a) ? ((a.tp ? 1 : 0) - (b.tp ? 1 : 0)) || (b.rows.length - a.rows.length) : 0));
     for (const b of ordered) {
       const isP = isPointsBlock(b);
       if (isP) { if (usedP) continue; usedP = true; }
@@ -739,27 +771,67 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
         race.stages = race.stages.filter(s => s !== e1);
         pro.points = true;
       }
+      // team time trial whose team points are listed as a separate sector ("Etapa 1.b" with only teams)
+      for (const ts of race.stages.slice()) {
+        if (!ts.rows.length || ts.rows.filter(r => !r.r && r.t).length < ts.rows.length / 2 || !ts.rows.every(r => (!r.r || !r.t) && r.pts != null)) continue;
+        const sib = race.stages.find(o => o !== ts && Math.floor(o.n) === Math.floor(ts.n) && o.rows.some(r => r.r && r.timey) && !o.rows.some(r => r.pts != null));
+        if (!sib) continue;
+        for (const t of ts.rows) {
+          const tk = teamKey(t.t || t.r);
+          const mine = sib.rows.filter(r => r.r && r.t && (teamKey(r.t) === tk || (tk.length >= 6 && teamKey(r.t).includes(tk))));
+          mine.forEach(r => { r.pts = Math.round(1e6 * t.pts / mine.length) / 1e6; });
+        }
+        race.stages = race.stages.filter(o => o !== ts);
+      }
       // leaders after each stage (from time-based GC blocks)
       race.leaders = {};
       for (const [n, r] of blocks.leaderPts) race.leaders[n] = r.r;
       blocks.filter(b => b.sec === 'GC' && b.ctx != null && !isPointsBlock(b) && b.rows[0] && b.rows[0].r).forEach(b => { race.leaders[b.ctx] = b.rows[0].r; });
-      if (blocks.leaderPts.size) race.cls_.LDR = [...blocks.leaderPts].sort((a, b) => a[0] - b[0]).map(([n, r]) => ({ ...r, p: n, v: '', pts: r.one }));
+      if (blocks.leaderPts.size) {
+        const teamOf = new Map(); race.stages.forEach(s => s.rows.forEach(r => { if (r.r && r.t) teamOf.set(riderKey(r.r), r.t); }));
+        race.cls_.LDR = [...blocks.leaderPts].sort((a, b) => a[0] - b[0]).map(([n, r]) => ({ ...r, t: r.t || teamOf.get(riderKey(r.r)) || null, p: n, v: '', pts: r.one }));
+      }
     } else {
       // one-day race whose points list is headed "Puntos"
-      if (!blocks.some(b => b.sec === 'R' && isPointsBlock(b))) blocks.filter(b => b.sec === 'PTS' && isPointsBlock(b) && b.rows.length >= 5).forEach(b => { b.sec = 'R'; });
+      if (!blocks.some(b => b.sec === 'R' && isPointsBlock(b))) blocks.filter(b => b.sec === 'PTS' && !b.rows.some(r => r.timey) && b.rows.filter(r => r.one != null).length >= Math.max(5, b.rows.length * 0.7)).forEach(b => { b.sec = 'R'; b.rows.forEach(r => { if (r.one == null && /^[\d. ]+$/.test(r.v || '')) { const t = r.v.split(' ').pop(); if (NUM_TOK.test(t)) r.one = toNum(t); } }); });
       const bs = blocks.filter(b => b.sec === 'R');
       const rows = finalize(pickBase(bs, true, true));
       const inf = stageInfo[0] || Object.values(stageInfo)[0] || {};
       if (rows) race.stages.push({ n: 0, label: 'Resultado', type: stageType(inf.rest), rows });
     }
     for (const c of ['GC', 'PTS', 'KOM', 'YOU', 'TEAM']) {
-      const bs = blocks.filter(b => b.sec === c && !b.ttt);
+      // points/mountain standings never carry times: a timed list there is a copy-paste of the GC
+      const bs = blocks.filter(b => b.sec === c && !b.ttt && !((c === 'PTS' || c === 'KOM') && b.rows.filter(r => r.timey).length > b.rows.length / 2));
       const rows = finalize(pickBase(bs, c === 'GC' || c === 'PTS' || c === 'KOM'));
       if (rows && rows.length) race.cls_[c] = rows;
     }
-    const tot = blocks.filter(b => b.sec === 'TOT').pop();
-    if (tot) race.cls_.TOT = tot.rows.map(r => ({ ...r, t: r.t || r.r, r: null, pts: r.one })).sort((a, b) => (b.pts || 0) - (a.pts || 0)).map((r, i) => ({ ...r, p: i + 1 }));
+    const tot = blocks.filter(b => b.sec === 'TOT' && b.rows.some(r => !r.r || !r.t)).pop();
+    const totr = blocks.filter(b => b.sec === 'TOTR').pop();
+    if (totr) race.riderTotals = totr.rows.filter(r => r.r && r.one != null).map(r => [r.r, r.one]);
+    if (tot) race.cls_.TOT = tot.rows.filter(r => !(r.r && r.t)).map(r => ({ ...r, t: r.t || r.r, r: null, pts: r.one })).sort((a, b) => (b.pts || 0) - (a.pts || 0)).map((r, i) => ({ ...r, p: i + 1 }));
+    // one-day team time trial with only team totals published: share them among the team's riders
+    if (!multi && race.stages[0] && race.cls_.TOT && !race.stages[0].rows.some(r => r.pts != null)) {
+      const rows = race.stages[0].rows;
+      const posShared = rows.filter((r, i) => i > 0 && r.p === rows[i - 1].p).length > rows.length / 3;
+      if (posShared || /equipos|squadre|ttt|cre\b|team/i.test(race.name)) {
+        const hasCls = ['YOU', 'TEAM'].some(k => (race.cls_[k] || []).some(r => r.pts));
+        if (!hasCls) for (const t of race.cls_.TOT) {
+          const mine = rows.filter(r => r.r && r.t && teamKey(r.t) === teamKey(t.t));
+          if (mine.length && t.pts) mine.forEach(r => { r.pts = Math.round(1e6 * t.pts / mine.length) / 1e6; });
+        }
+      }
+    }
     race.multi = multi;
+    // pictures (race / stage profiles) posted in the topic
+    const pics = i => ((topic.posts[i] || {}).im || []).filter(Boolean);
+    const firstPic = topic.posts.map((p, i) => pics(i)[0]).find(Boolean) || null;
+    race.im = firstPic;
+    if (multi) for (const st of race.stages) {
+      const b = blocks.find(b => b.ctx === st.n && b.sec === 'R' && b.rows.some(r => r.timey));
+      const im = b ? pics(b.post)[0] : null;
+      if (im && im !== firstPic) st.im = im;
+      else if (im && race.stages.length === 1) st.im = im;
+    }
     return race;
   }
 
@@ -793,7 +865,24 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
       if (!riders.length) return;
       byMgr.set(p.a || ('#' + p.id), { manager: p.a, team: p.tm || null, date: p.d, riders });
     });
-    return { id: topic.id, title: topic.t.title, ...info, closed: !!topic.t.closed, minR: mr ? +mr[1] : null, maxR: mr ? +(mr[2] || mr[1]) : null, entries: [...byMgr.values()] };
+    const img = (topic.posts[0] && topic.posts[0].im) || topic.img || [];
+    // points scale in the first post: "Puntos:" then "1º 625", "2º 425", … ">31º 3"
+    let sc = null, scRest = null;
+    if (rules) {
+      let on = false;
+      for (const raw of rules.L) {
+        const l = norm(raw);
+        if (/^puntos\b/i.test(l)) { on = true; sc = []; continue; }
+        if (!on) continue;
+        let m = l.match(/^(\d+)\s*[ºª°o]?\.?\s*[:\-]?\s*(\d[\d.,]*)$/);
+        if (m) { sc[+m[1] - 1] = toNum(m[2]); continue; }
+        m = l.match(/^(?:>|\+|más de|desde( el)?)\s*=?\s*(\d+)\s*[ºª°o]?\.?\s*[:\-]?\s*(\d[\d.,]*)$/i);
+        if (m) { scRest = [+m[2], toNum(m[3])]; continue; }
+        if (sc.length) break;
+      }
+      if (sc && !sc.length) sc = null;
+    }
+    return { id: topic.id, title: topic.t.title, ...info, sc, scRest, im: ((topic.posts[0] || {}).im || [])[0] || null, closed: !!topic.t.closed, minR: mr ? +mr[1] : null, maxR: mr ? +(mr[2] || mr[1]) : null, entries: [...byMgr.values()], img: img.slice(0, 4) };
   }
 
   G.MC = { norm, fold, riderKey, tokenKey, teamKey, parseTitle, sectionOf, stageCtx, TeamIndex, learnTeams, topicBlocks, parseRaceTopic, parseInscriptionTopic, isPointsBlock };
@@ -812,15 +901,16 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
   const MC = G.MC;
   const SEC_ORDER = ['GC', 'PTS', 'KOM', 'YOU', 'TEAM', 'TOT', 'LDR'];
 
+  // edit distance counting a swap of two neighbouring letters as one edit ("Cavgana" / "Cavagna")
   function lev(a, b) {
     if (Math.abs(a.length - b.length) > 2) return 9;
-    let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
-    for (let i = 1; i <= a.length; i++) {
-      const cur = [i];
-      for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
-      prev = cur;
+    const d = Array.from({ length: a.length + 1 }, (_, i) => [i]);
+    for (let j = 1; j <= b.length; j++) d[0][j] = j;
+    for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) {
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
     }
-    return prev[b.length];
+    return d[a.length][b.length];
   }
 
   // Limpia restos pegados al nombre del corredor: "1.Remco Evenepoel", "GBR Simon Yates",
@@ -832,7 +922,7 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
     s = s.replace(/^\d+\s*[.)º-]\s*/, '');
     const m = s.match(/^([A-Z]{3})\s+(.+)$/);
     if (m && NOC.has(m[1]) && m[2].split(' ').length >= 2) s = m[2];
-    s = s.replace(/\s+(CN|CC|CM|CE|EEUU|\(CN\)|\(CM\))$/, '').replace(/\s+\d+([.,]\d+)?$/, '');
+    s = s.replace(/\s+[-(\[]?J[)\]]?$/, ' (J)').replace(/\s+(CN|CC|CM|CE|EEUU|\(CN\)|\(CM\))$/, '').replace(/\s+\d+([.,]\d+)?$/, '');
     return MC.norm(s);
   }
   const isJunk = name => !name || JUNK.test(name) || !/[a-zà-ž]/i.test(name) || name.length > 40;
@@ -927,29 +1017,147 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
         const m = scale.get(key(r));
         for (const x of rows) if (x[4] != null && x[0] > 0) { const c = m.get(x[0]) || new Map(); c.set(x[4], (c.get(x[4]) || 0) + 1); m.set(x[0], c); }
       }
+      // Leader points: some summaries forget the "Líder" lines although the forum totals include them.
+      const today = new Date().toISOString().slice(0, 10);
+      const ldVal = new Map();
+      for (const r of data.races) for (const x of (r.cl.LDR || [])) { if (x[4] == null || r.ldx) continue; const c = ldVal.get(key(r)) || new Map(); c.set(x[4], (c.get(x[4]) || 0) + 1); ldVal.set(key(r), c); }
+      for (const r of data.races) {
+        if (!r.multi || (r.cl.LDR && r.cl.LDR.length && !r.ldx) || !r.ld || !ldVal.has(key(r)) || (r.end && r.end >= today)) continue;
+        let best = null, bn = 0; for (const [v, n] of ldVal.get(key(r))) if (n > bn) { bn = n; best = v; }
+        if (best == null || bn < 3) continue;
+        const last = Math.max(...r.st.map(s => s.n));
+        const rows = Object.entries(r.ld).filter(([n, rid]) => +n < last && rid >= 0).map(([n, rid]) => {
+          const t = (r.cl.GC || []).find(w => w[1] === rid) || r.st.flatMap(s => s.rows).find(w => w[1] === rid);
+          return [+n, rid, t ? t[2] : -1, '', best];
+        });
+        if (rows.length) { r.cl.LDR = rows; r.ldx = 1; }
+      }
+      // Team / young riders' classification points missing from the summary: take the final order from
+      // the "(n)" of the last stage's classification and the usual points of that class and season.
+      for (const k of ['TEAM', 'YOU']) {
+        const sc = new Map();
+        for (const r of data.races) if (r.multi && r.cl[k]) for (const x of r.cl[k]) if (x[4] != null && !r['fx' + k]) { const c = sc.get(key(r)) || new Map(); const m = c.get(x[0]) || new Map(); m.set(x[4], (m.get(x[4]) || 0) + 1); c.set(x[0], m); sc.set(key(r), c); }
+        for (const r of data.races) {
+          const rows = r.cl[k];
+          if (!r.multi || !rows || !rows.length || rows.some(x => x[4] != null) || !sc.has(key(r)) || (r.end && r.end >= today)) continue;
+          const withPos = rows.map(x => { const m = String(x[3]).match(/\((\d+)\)\s*$/); return m ? [+m[1], x] : null; });
+          if (withPos.some(x => !x)) continue;
+          const c = sc.get(key(r));
+          withPos.sort((a, b) => a[0] - b[0]).forEach(([pos, x]) => {
+            const m = c.get(pos); if (!m) return; let best = null, bn = 0; for (const [v, n] of m) if (n > bn) { bn = n; best = v; }
+            x[0] = pos; if (bn >= 3) x[4] = best;
+          });
+          rows.sort((a, b) => a[0] - b[0]); r['fx' + k] = 1;
+        }
+      }
       let filled = 0;
+      // the inscription topic of the same race publishes its points scale: use it first
+      const insOf = r => data.ins.find(i => i.s === r.s && i.start === r.start && i.sc && MC.riderKey(i.name).split(' ')[0] === MC.riderKey(r.name).split(' ')[0]);
+      for (const r of data.races) {
+        if (r.multi || !r.st[0]) continue;
+        const rows = r.st[0].rows, withP = rows.filter(x => x[4] != null);
+        if (!withP.length || withP.length === rows.length) continue;
+        const i = insOf(r); if (!i) continue;
+        const lastP = Math.max(...withP.map(x => x[0]));
+        for (const x of rows) {
+          if (x[4] != null || !(x[0] > lastP) || x[1] < 0) continue;
+          const v = i.sc[x[0] - 1] ?? (i.scr && x[0] >= i.scr[0] ? i.scr[1] : null);
+          if (v != null) { x[4] = v; filled++; }
+        }
+      }
       for (const r of data.races) {
         if (r.multi || !r.st[0] || !scale.has(key(r))) continue;
         const rows = r.st[0].rows, m = scale.get(key(r));
         const withP = rows.filter(x => x[4] != null).length;
         if (!withP || withP === rows.length) continue;
         const lastP = Math.max(...rows.filter(x => x[4] != null).map(x => x[0]));
+        // what each team is still missing compared with the totals published for the race
+        const deficit = new Map();
+        if (r.cl.TOT) {
+          const got = new Map(); const add = (t, v) => { if (t >= 0 && v) got.set(t, (got.get(t) || 0) + v); };
+          rows.forEach(x => add(x[2], x[4])); for (const k of ['GC', 'PTS', 'KOM', 'YOU', 'LDR', 'TEAM']) (r.cl[k] || []).forEach(x => add(x[2], x[4]));
+          r.cl.TOT.forEach(x => { if (x[2] >= 0 && x[4]) deficit.set(x[2], x[4] - (got.get(x[2]) || 0)); });
+        }
         for (const x of rows) {
-          if (x[4] != null || !(x[0] > lastP) || x[1] < 0) continue;
+          if (x[4] != null || !(x[0] > 0) || x[1] < 0) continue;
+            // inside the list only fill a single missing line between two that have points
+          const inside = x[0] <= lastP;
+          if (inside && !(rows.some(o => o[0] === x[0] - 1 && o[4] != null) && rows.some(o => o[0] === x[0] + 1 && o[4] != null))) continue;
           const c = m.get(x[0]); if (!c) continue;
           let best = null, bn = 0; for (const [v, n] of c) if (n > bn) { bn = n; best = v; }
-          if (best != null && bn >= 2) { x[4] = best; filled++; }
+          if (best == null || bn < 2) continue;
+          // a line missing inside the list is only filled when the team totals confirm it
+          if (inside && !(deficit.get(x[2]) >= best - 0.5)) continue;
+          x[4] = best; filled++; if (deficit.has(x[2])) deficit.set(x[2], deficit.get(x[2]) - best);
         }
       }
       return filled;
+    }
+
+    // Same rider written two ways in results ("Natnael Tesfatsion" / "Natnael Tesfazion"): names one or two
+    // letters apart, riding for the same team in the same season and never in the same race → one rider.
+    function mergeDuplicates() {
+      const N = data.riders.length;
+      const races = Array.from({ length: N }, () => new Set()), teams = Array.from({ length: N }, () => new Set()), refs = new Array(N).fill(0);
+      const each = fn => { for (const r of data.races) { r.st.forEach((s, si) => { for (const x of s.rows) fn(x, r, 's' + si); }); for (const k in r.cl) for (const x of r.cl[k]) fn(x, r, k); } };
+      each((x, r, l) => { const i = x[1]; if (i >= 0 && i < N) { races[i].add(r.id + l); refs[i]++; if (x[2] >= 0) teams[i].add(r.s + ':' + x[2]); } });
+      const keys = data.riders.map(r => MC.fold(r[0].replace(/\(J\)/gi, '')).replace(/[^a-z ]/g, '').replace(/\s+/g, ' ').trim());
+      const parent = Array.from({ length: N }, (_, i) => i);
+      const find = i => { while (parent[i] !== i) i = parent[i] = parent[parent[i]]; return i; };
+      const ids = keys.map((k, i) => i).filter(i => keys[i].length > 6 && refs[i] > 0);
+      for (let a = 0; a < ids.length; a++) for (let b = a + 1; b < ids.length; b++) {
+        const i = ids[a], j = ids[b];
+        if (Math.abs(keys[i].length - keys[j].length) > 2 || keys[i][0] !== keys[j][0] && keys[i].split(' ').pop()[0] !== keys[j].split(' ').pop()[0]) continue;
+        if (lev(keys[i], keys[j]) > 2) continue;
+        if (![...teams[i]].some(t => teams[j].has(t))) continue;
+        if ([...races[i]].some(r => races[j].has(r))) continue;
+        const ri = find(i), rj = find(j); if (ri === rj) continue;
+        if (G.MC_LOG_MERGE) console.log("merge", data.riders[i][0], "=", data.riders[j][0]);
+        if (refs[ri] >= refs[rj]) parent[rj] = ri; else parent[ri] = rj;
+      }
+      // riders only seen in inscriptions, misspelled: attach them to the one rider with results that is close enough
+      const withRes = keys.map((k, i) => i).filter(i => refs[i] > 0 && keys[i].length > 6);
+      for (let i = 0; i < N; i++) {
+        if (refs[i] > 0 || keys[i].length <= 6) continue;
+        const lim = keys[i].length > 12 ? 2 : 1;
+        const c = withRes.filter(j => Math.abs(keys[i].length - keys[j].length) <= lim && lev(keys[i], keys[j]) <= lim);
+        if (c.length === 1) parent[i] = find(c[0]);
+      }
+      if (parent.every((p, i) => p === i)) return;
+      for (let i = 0; i < N; i++) { const m = find(i); if (m !== i) { for (const y of data.riders[i].slice(1)) if (!data.riders[m].includes(y, 1)) data.riders[m].push(y); for (const [n, c] of Object.entries(votes[i] || {})) votes[m][n] = (votes[m][n] || 0) + c; } }
+      each(x => { if (x[1] >= 0) x[1] = find(x[1]); });
+      for (const r of data.races) if (r.ld) for (const k in r.ld) if (r.ld[k] >= 0) r.ld[k] = find(r.ld[k]);
+      for (const i of data.ins) for (const e of i.e) e.r = [...new Set(e.r.map(find))];
+      // drop riders nobody refers to any more and renumber
+      const used = new Set(); each(x => { if (x[1] >= 0) used.add(x[1]); });
+      for (const r of data.races) if (r.ld) Object.values(r.ld).forEach(v => v >= 0 && used.add(v));
+      for (const i of data.ins) for (const e of i.e) e.r.forEach(v => used.add(v));
+      const map = new Map(); const riders = [], nv = [];
+      data.riders.forEach((r, i) => { if (used.has(i)) { map.set(i, riders.length); riders.push(r); nv.push(votes[i]); } });
+      const re = v => (v >= 0 ? map.get(v) ?? -1 : v);
+      each(x => { x[1] = re(x[1]); });
+      for (const r of data.races) if (r.ld) for (const k in r.ld) r.ld[k] = re(r.ld[k]);
+      for (const i of data.ins) for (const e of i.e) e.r = e.r.map(re).filter(v => v >= 0);
+      data.riders = riders; votes.length = 0; votes.push(...nv);
+      riderId.clear(); tokId.clear();
+      data.riders.forEach((r, i) => { riderId.set(MC.riderKey(r[0]), i); tokId.set(MC.tokenKey(r[0]), i); });
     }
 
     return {
       data,
       addRace(r, replies) {
         curSeason = seasonOf(r);
-        const o = { id: r.id, s: seasonOf(r), name: r.name, start: r.start, end: r.end, c: r.country, cls: r.cls, note: r.note || undefined, multi: r.multi ? 1 : 0, rp: replies, st: [], cl: {} };
-        for (const s of r.stages) o.st.push({ n: s.n, l: s.label, ty: s.type || undefined, ro: s.route || undefined, rows: s.rows.map(rowOut) });
+        const o = { id: r.id, s: seasonOf(r), name: r.name, start: r.start, end: r.end, c: r.country, cls: r.cls, note: r.note || undefined, im: r.im || undefined, multi: r.multi ? 1 : 0, rp: replies, st: [], cl: {} };
+        for (const s of r.stages) o.st.push({ n: s.n, l: s.label, ty: s.type || undefined, ro: s.route || undefined, im: s.im || undefined, rows: s.rows.map(rowOut) });
+        // team totals often use short names ("Trek", "Ineos"): match them to the teams of this race
+        const local = new Map(); for (const s of r.stages) for (const x of s.rows) if (x.t) local.set(MC.teamKey(x.t), x.t);
+        for (const k of ['GC', 'TEAM', 'YOU']) for (const x of (r.cls_[k] || [])) if (x.t) local.set(MC.teamKey(x.t), x.t);
+        const localTeam = n => {
+          const k = MC.teamKey(n || '').replace('bahrein', 'bahrain'); if (!k || local.has(k)) return local.get(k) || n;
+          const c = [...local.keys()].filter(lk => k.length >= 3 && (lk.startsWith(k) || lk.includes(k) || (lk.length >= 5 && k.includes(lk))));
+          return c.length === 1 ? local.get(c[0]) : n;
+        };
+        if (r.cls_.TOT) r.cls_.TOT = r.cls_.TOT.map(x => ({ ...x, t: localTeam(x.t) }));
         for (const k of SEC_ORDER) if (r.cls_[k]) o.cl[k] = r.cls_[k].map(rowOut);
         if (r.leaders && Object.keys(r.leaders).length) { o.ld = {}; for (const [n, name] of Object.entries(r.leaders)) o.ld[n] = rid(name); }
         if (!o.st.length && !Object.keys(o.cl).length) return;
@@ -957,7 +1165,7 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
       },
       addIns(i, replies) {
         curSeason = seasonOf(i);
-        const o = { id: i.id, s: seasonOf(i), name: i.name, start: i.start, end: i.end, c: i.country, cls: i.cls, note: i.note || undefined, closed: i.closed ? 1 : 0, rp: replies, min: i.minR, max: i.maxR,
+        const o = { id: i.id, s: seasonOf(i), name: i.name, start: i.start, end: i.end, c: i.country, cls: i.cls, note: i.note || undefined, im: i.im || undefined, sc: i.sc || undefined, scr: i.scRest || undefined, closed: i.closed ? 1 : 0, rp: replies, min: i.minR, max: i.maxR,
           e: i.entries.map(e => ({ m: e.manager, t: e.team, d: e.date, r: e.riders.map(x => {
             if (teamId.has(MC.teamKey(x.name)) || isJunk(stripTeam(cleanName(x.name)))) return -1;
             let id = rid(x.name, false);
@@ -965,9 +1173,11 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
             if (x.young) markYoung(id);
             return id;
           }).filter(id => id >= 0) })).filter(e => e.r.length) };
+        if (i.img && i.img.length) o.img = i.img;
         upsert(data.ins, o);
       },
       finish(meta) {
+        mergeDuplicates();
         fillScales();
         data.riders.forEach((r, i) => {
           const v = Object.entries(votes[i] || {}).map(([n, c]) => [n, c * capsPenalty(n)]).sort((a, b) => b[1] - a[1] || b[0].length - a[0].length);
@@ -1032,6 +1242,13 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
     }
     return out;
   }
+  // pictures in a post (race profiles, maps…), without smileys, icons or avatars
+  const isPicture = src => /^https?:\/\//i.test(src) && !/smil|emoji|icon|avatar|rank|\/images\/|button|forumactif\.com\/i\/|illiweb|\.svg(\?|$)/i.test(src);
+  function imagesText(html) {
+    const out = [];
+    for (const m of html.matchAll(/<img\b[^>]*?\bsrc="([^"]+)"/gi)) { const src = decode(m[1]); if (isPicture(src) && !out.includes(src)) out.push(src); }
+    return out.slice(0, 6);
+  }
   function pageCountText(html) { let max = 1; for (const m of html.matchAll(/href="\/?f\d+p(\d+)-/g)) max = Math.max(max, Math.floor(+m[1] / TOPICS_PER_PAGE) + 1); return max; }
   function readPostsText(html) {
     const parts = html.split(/<tr class="post\b/i).slice(1);
@@ -1051,7 +1268,7 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
       const sig = body.search(/<div class="signature_div"/i);
       const end = body.search(/<\/td>\s*<\/tr>\s*<\/tbody>\s*<\/table>/i);
       body = body.slice(0, sig >= 0 ? sig : (end >= 0 ? end : body.length));
-      out.push({ a: author, tm: team, d: date, id: idm ? +idm[1] : null, L: htmlLines(body) });
+      out.push({ a: author, tm: team, d: date, id: idm ? +idm[1] : null, L: htmlLines(body), im: imagesText(body) });
     }
     return out;
   }
@@ -1143,7 +1360,8 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
         const prof = norm(profEl && profEl.childNodes[0] ? profEl.childNodes[0].textContent : '');
         const team = (prof.match(/^M[áa]nager del?\s+(.+)$/i) || [])[1] || null;
         const date = norm((right.querySelector('.postdetails') || {}).textContent || '').replace(/^.*?(?=(Lun|Mar|Mi[ée]r?|Jue|Vie|S[áa]b|Dom|Hoy|Ayer)\b)/, '');
-        return { a: author, tm: team, d: date, id: +(tr.id || '').replace(/\D/g, '') || null, L: bodyLines(body) };
+        const im = [...new Set([...body.querySelectorAll('img')].map(i => i.getAttribute('src') || '').filter(isPicture))].slice(0, 6);
+        return { a: author, tm: team, d: date, id: +(tr.id || '').replace(/\D/g, '') || null, L: bodyLines(body), im };
       }).filter(Boolean);
     }
     async function topic(t, kind) {
@@ -1153,9 +1371,16 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
         const slug = p === 0 ? t.slug : t.slug.replace(/^t(\d+)-/, `t$1p${p * POSTS_PER_PAGE}-`);
         posts = posts.concat(readPosts(await getDoc('/' + slug)));
       }
-      return { id: t.id, t: { ...t, kind }, posts };
+      // pictures: race profile in the first post; in results also each stage post's profile
+      posts.forEach((p, i) => { if ((i > 0 && kind !== 'res') || !p.im || !p.im.length) delete p.im; else p.im = p.im.slice(0, 3); });
+      return { id: t.id, t: { ...t, kind }, posts, iv: 1 };
     }
-    return { getDoc, forumTopics, topic, readPosts, listTopics, stop() { stopped = true; } };
+    // first post's pictures only (one request)
+    async function firstImages(t) {
+      const posts = readPosts(await getDoc('/' + t.slug));
+      return (posts[0] && posts[0].im) || [];
+    }
+    return { getDoc, forumTopics, topic, firstImages, readPosts, listTopics, stop() { stopped = true; } };
   }
 
   G.MCForum = { Forum, BASE, readPostsText, listTopicsText };
@@ -1532,6 +1757,10 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
     }
     // palmarés: misma carrera en otras temporadas
     if (r) { const g = history().byKey.get(r.hk || raceKey(r.name, r.cls)); if (g && g.eds.length) side += `<section class="card"><div class="card-h"><h2 class="h2">Palmarés</h2><a class="more" href="#historia-${g.slug}">Historial</a></div><ul class="wl">${g.eds.slice().reverse().map(e => `<li><span class="li-date">${e.s}</span><span>${e.w ? rlink(e.w[1]) : '—'}</span><a class="small" href="#carrera-${e.ev.id}">${e.ev === ev ? 'esta edición' : 'ver'}</a></li>`).join('')}</ul>${g.rec[0] && g.rec[0][1].length > 1 ? `<p class="small"><span class="rec">Récord</span> ${rlink(g.rec[0][0])} · ${g.rec[0][1].length} victorias</p>` : ''}</section>`; }
+    // perfil de la carrera: la foto que el organizador pone en el primer mensaje de la inscripción
+    const curStage = r && cur[0] === 's' && cur !== 'sl' && r.multi ? r.st[+cur.slice(1)] : null;
+    const imgs = curStage && curStage.im ? [curStage.im] : [...new Set([...((ev.ins && ev.ins.img) || []), ...(ev.ins && ev.ins.im ? [ev.ins.im] : []), ...(r && r.im ? [r.im] : [])])].slice(0, 2);
+    if (imgs.length) side = `<section class="card perfil"><h2 class="h2">${curStage && curStage.im ? esc('Perfil · ' + curStage.l) : 'Perfil'}</h2>${imgs.map((u, k) => `<a href="${esc(u)}" target="_blank" rel="noopener" title="Abrir la imagen"><img src="${esc(u)}" alt="Perfil de ${esc(ev.name)}${imgs.length > 1 ? ' ' + (k + 1) : ''}" loading="lazy" referrerpolicy="no-referrer" onerror="this.closest('a').remove()"></a>`).join('')}</section>` + side;
     if (ev.ins && cur !== 'sl') side += `<section class="card"><h2 class="h2">Inscripción</h2><p class="small">${ev.ins.e.length} equipos inscritos. <a href="#carrera-${ev.id}" data-tab="sl">Ver inscritos</a></p></section>`;
     const links = [r ? `<a href="${FORUM}/t${r.id}-" target="_blank" rel="noopener">Resultados en el foro</a>` : '', ev.ins ? `<a href="${FORUM}/t${ev.ins.id}-" target="_blank" rel="noopener">Inscripciones en el foro</a>` : ''].filter(Boolean).join(' · ');
     return `<header class="ph">
