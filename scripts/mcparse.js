@@ -222,7 +222,7 @@
       }
       for (const raw of lines) {
         const lr = raw.replace(/^\s*spoiler:\s*/i, '');
-        if (/^\s*l[íi]der\b/i.test(lr)) {
+        if (/^\s*l[íi]der\b/i.test(lr) || /^\s*L[íi]der[A-ZÀ-Ý]/.test(lr)) {
           // "Líder Remco Evenepoel (J)  Team Flanders - Baloise  96": puntos MC por ir líder tras la etapa
           const rest = lr.replace(/^\s*l[íi]der\s*:?\s*/i, '');
           const r = /\d\s*$/.test(rest) ? parseRow(rest, 'R', teams) : null;

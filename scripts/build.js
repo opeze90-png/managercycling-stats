@@ -117,6 +117,21 @@
   function fillScales() {
       const scale = new Map();
       const key = r => r.s + '|' + r.cls;
+      fixTTT(key);
+      // Clásica publicada con la escala multiplicada (p. ej. todo ×2 por error): la oficial aplica la escala
+      // de la inscripción. Sólo si TODAS las posiciones con escala salen con el mismo factor.
+      for (const r of data.races) {
+        if (r.multi || !r.st[0]) continue;
+        const i = data.ins.find(i => i.s === r.s && i.start === r.start && i.sc && (i.cls || '') === (r.cls || '') && MC.riderKey(i.name).split(' ')[0] === MC.riderKey(r.name).split(' ')[0]);
+        if (!i) continue;
+        const exp = p => i.sc[p - 1] ?? (i.scr && p >= i.scr[0] ? i.scr[1] : null);
+        const rows = r.st[0].rows.filter(x => x[4] != null && x[0] > 0 && exp(x[0]));
+        if (rows.length < 8) continue;
+        const k = rows[0][4] / exp(rows[0][0]);
+        if (k < 1.01 || !rows.every(x => Math.abs(x[4] - k * exp(x[0])) < 0.01)) continue;
+        for (const x of r.st[0].rows) { const e = exp(x[0]); if (x[4] != null && e != null) x[4] = e; }
+        r.scx = k;
+      }
       for (const r of data.races) {
         if (r.multi || !r.st[0] || !r.cls) continue;
         const rows = r.st[0].rows;
@@ -156,6 +171,24 @@
             x[0] = pos; if (bn >= 3) x[4] = best;
           });
           rows.sort((a, b) => a[0] - b[0]); r['fx' + k] = 1;
+        }
+      }
+      // Clásicas sin clasificación de jóvenes publicada (p. ej. cronos por equipos): la oficial la saca del
+      // orden de llegada de los corredores (J) con la escala habitual de jóvenes de esa categoría.
+      {
+        const ysc = new Map();
+        for (const r of data.races) if (!r.multi && r.cl.YOU) for (const x of r.cl.YOU) if (x[4] != null && x[0] > 0) { const c = ysc.get(key(r)) || new Map(); const m = c.get(x[0]) || new Map(); m.set(x[4], (m.get(x[4]) || 0) + 1); c.set(x[0], m); ysc.set(key(r), c); }
+        for (const r of data.races) {
+          if (+r.s < 2025 || r.multi || !r.st[0] || (r.cl.YOU && r.cl.YOU.length) || !ysc.has(key(r)) || /U$/.test(r.cls || '')) continue;
+          const c = ysc.get(key(r)), out = [];
+          for (const x of r.st[0].rows) {
+            if (x[1] < 0 || !data.riders[x[1]] || !data.riders[x[1]].slice(1).some(s => +s === +r.s)) continue;
+            const pos = out.length + 1, m = c.get(pos); if (!m) break;
+            let best = null, bn = 0; for (const [v, n] of m) if (n > bn) { bn = n; best = v; }
+            if (best == null || bn < 3) break;
+            out.push([pos, x[1], x[2], '', best]);
+          }
+          if (out.length) { r.cl.YOU = out; r.youx = 1; }
         }
       }
       let filled = 0;
@@ -200,6 +233,84 @@
         }
       }
       return filled;
+    }
+
+    // Equipo que cambia de nombre a mitad de temporada ("GW Erco Shimano" → "GW Erco SportFitness"): el mismo
+    // mánager inscribe con los dos nombres y nunca coinciden en una carrera → es un solo equipo esa temporada.
+    function mergeTeamRenames() {
+      const bySeason = new Map();
+      for (const i of data.ins) for (const e of i.e || []) {
+        if (!e.m || !e.t) continue; const t = teamId.get(MC.teamKey(e.t)); if (t == null) continue;
+        const k = i.s + '|' + e.m.toLowerCase(); const m = bySeason.get(k) || new Map(); const o = m.get(t) || { n: 0, last: '' };
+        o.n++; if ((i.start || '') > o.last) o.last = i.start || ''; m.set(t, o); bySeason.set(k, m);
+      }
+      // también por nombre: mismas dos primeras palabras significativas ("GW Erco …") y nunca juntos en una carrera
+      const sig = n => MC.norm(n).toLowerCase().split(/[\s\-|/]+/).filter(w => w && !/^(team|cycling|pro|procycling|the|de|-)$/.test(w)).slice(0, 2).join(' ');
+      for (const s of new Set(data.races.map(r => r.s))) {
+        const used = new Map();
+        for (const r of data.races) if (r.s === s) for (const x of r.st) for (const w of x.rows) if (w[2] >= 0) { const o = used.get(w[2]) || { last: '' }; if ((r.start || '') > o.last) o.last = r.start || ''; used.set(w[2], o); }
+        const groups = new Map();
+        for (const t of used.keys()) { const g = sig(data.teams[t] || ''); if (g.split(' ').length < 2 || g.length < 5) continue; if (!groups.has(g)) groups.set(g, []); groups.get(g).push(t); }
+        for (const ids of groups.values()) if (ids.length > 1) { const m = new Map(ids.map(t => [t, { n: 1, last: used.get(t).last }])); bySeason.set(s + '|~' + ids.join(','), m); }
+      }
+      for (const [k, m] of bySeason) {
+        if (m.size < 2) continue;
+        const s = +k.split('|')[0];
+        const ids = [...m.keys()];
+        const together = data.races.some(r => r.s === s && (() => { const ts = new Set(r.st.flatMap(x => x.rows.map(w => w[2]))); return ids.filter(t => ts.has(t)).length > 1; })());
+        if (together) continue;
+        const keep = ids.sort((a, b) => m.get(b).last.localeCompare(m.get(a).last))[0];
+        const map = new Set(ids.filter(t => t !== keep));
+        if (typeof process !== 'undefined' && process.env && process.env.MC_LOG_TEAMS) console.error('team merge', s, ids.map(t => data.teams[t]).join(' | '), '→', data.teams[keep]);
+        const fix = w => { if (map.has(w[2])) w[2] = keep; };
+        for (const r of data.races) if (r.s === s) { r.st.forEach(x => x.rows.forEach(fix)); for (const c in r.cl) r.cl[c].forEach(fix); }
+        for (const i of data.ins) if (i.s === s) for (const e of i.e || []) if (map.has(teamId.get(MC.teamKey(e.t)))) e.t = data.teams[keep];
+      }
+    }
+
+    // Crono por equipos: la clasificación oficial reparte los puntos del puesto del equipo (escala de la
+    // carrera o de las etapas de esa categoría) a partes iguales entre sus corredores, sin redondear y sin
+    // sumar la clasificación por equipos. El foro a veces publica el reparto redondeado o con los totales.
+    function fixTTT(key) {
+      const isTTT = rows => {
+        if (rows.length < 6) return false;
+        const shared = rows.filter((x, i) => i > 0 && x[0] === rows[i - 1][0] && x[2] === rows[i - 1][2] && x[2] >= 0).length;
+        return shared > rows.length / 2;
+      };
+      const mode = m => { let best = null, bn = 0; for (const [v, n] of m) if (n > bn) { bn = n; best = v; } return [best, bn]; };
+      // escala de etapas por categoría y temporada
+      const stScale = new Map();
+      for (const r of data.races) {
+        if (!r.multi || !r.cls) continue;
+        for (const s of r.st) {
+          if (isTTT(s.rows) || s.rows.filter(x => x[4] != null).length < 10) continue;
+          const c = stScale.get(key(r)) || new Map();
+          for (const x of s.rows) if (x[4] != null && x[0] > 0 && x[0] <= 30) { const m = c.get(x[0]) || new Map(); m.set(x[4], (m.get(x[4]) || 0) + 1); c.set(x[0], m); }
+          stScale.set(key(r), c);
+        }
+      }
+      const insOf = r => data.ins.find(i => i.s === r.s && i.start === r.start && i.sc && MC.riderKey(i.name).split(' ')[0] === MC.riderKey(r.name).split(' ')[0] && (i.cls || '') === (r.cls || ''));
+      let n = 0;
+      for (const r of data.races) {
+        if (+r.s < 2025) continue; // hasta 2024 la clasificación oficial usaba el reparto publicado
+        for (const s of r.st) {
+          if (!isTTT(s.rows)) continue;
+          let S = null;
+          if (!r.multi) { const i = insOf(r); if (i) S = p => i.sc[p - 1] ?? null; }
+          else if (stScale.has(key(r))) { const c = stScale.get(key(r)); S = p => { const m = c.get(p); if (!m) return null; const [v, k] = mode(m); return k >= 3 ? v : null; }; }
+          if (!S) continue;
+          const groups = new Map();
+          for (const x of s.rows) { if (x[1] < 0 || x[2] < 0) continue; const g = x[0] + ':' + x[2]; if (!groups.has(g)) groups.set(g, []); groups.get(g).push(x); }
+          for (const xs of groups.values()) {
+            const v = S(xs[0][0]); if (v == null) continue;
+            const each = v / xs.length, posted = xs[0][4];
+            // sólo si lo publicado es ese reparto (redondeado) o el total del equipo con alguna clasificación extra
+            if (posted != null && Math.abs(posted - each) > 0.01 && !(Math.abs(posted * xs.length - v) <= xs.length) && !(posted * xs.length > v && posted * xs.length - v <= v * 0.35)) continue;
+            for (const x of xs) { if (x[4] !== each) { x[4] = Math.round(each * 1e6) / 1e6; n++; } }
+          }
+        }
+      }
+      return n;
     }
 
     // Same rider written two ways in results ("Natnael Tesfatsion" / "Natnael Tesfazion"): names one or two
@@ -286,6 +397,7 @@
       },
       finish(meta) {
         mergeDuplicates();
+        mergeTeamRenames();
         fillScales();
         data.riders.forEach((r, i) => {
           const v = Object.entries(votes[i] || {}).map(([n, c]) => [n, c * capsPenalty(n)]).sort((a, b) => b[1] - a[1] || b[0].length - a[0].length);
@@ -314,5 +426,38 @@
     for (const x of ins) { try { const i = MC.parseInscriptionTopic(x); if (i.start) comp.addIns(i, x.t.replies); } catch (e) { opts.onError && opts.onError(x, e); } }
   }
 
-  G.MCBuild = { Compactor, ingest };
+  // Puntos y días por corredor y puntos por equipo de una temporada, con las mismas reglas que la web (app.js)
+  function seasonTotals(data, season, today) {
+    today = today || new Date().toISOString().slice(0, 10);
+    const daysBetween = (a, b) => Math.round((new Date(b) - new Date(a)) / 864e5);
+    const R = new Map(), T = new Map();
+    const RS = id => { let o = R.get(id); if (!o) { o = { pts: 0, days: 0 }; R.set(id, o); } return o; };
+    for (const r of data.races) {
+      if (+r.s !== +season) continue;
+      const add = row => { const [p, rid, tid, v, pts] = row; if (tid >= 0 && pts) T.set(tid, (T.get(tid) || 0) + pts); if (rid >= 0) RS(rid).pts += pts || 0; };
+      r.st.forEach(s => s.rows.forEach(add));
+      for (const k of ['GC', 'PTS', 'KOM', 'YOU', 'LDR']) (r.cl[k] || []).forEach(add);
+      (r.cl.TEAM || []).forEach(([p, rid, tid, v, pts]) => { if (tid >= 0 && pts) T.set(tid, (T.get(tid) || 0) + pts); });
+      const dayRows = new Map();
+      if (/^(WC|OG)\./.test(r.cls || '')) { /* no cuentan */ }
+      else if (!r.multi) {
+        r.st.forEach(s => s.rows.forEach(w => { if (w[1] >= 0) dayRows.set(w[1], 1); }));
+        for (const k of ['GC', 'PTS', 'KOM', 'YOU', 'LDR']) (r.cl[k] || []).forEach(w => { if (w[1] >= 0) dayRows.set(w[1], 1); });
+      } else {
+        const prl = new Set(r.st.filter(s => s.ty === 'PRL').map(s => Math.floor(s.n)));
+        const dayN = [...new Set(r.st.map(s => Math.floor(s.n)))].sort((a, b) => (prl.has(b) - prl.has(a)) || a - b);
+        const span = r.end && r.start ? daysBetween(r.start, r.end) + 1 : dayN.length;
+        const D = Math.min(dayN.length, span);
+        const ended = !(r.end && r.end >= today);
+        r.st.forEach(s => { const di = dayN.indexOf(Math.floor(s.n)); s.rows.forEach(w => { if (w[1] >= 0) dayRows.set(w[1], Math.max(dayRows.get(w[1]) || 0, di + 1)); }); });
+        const gc = new Set((r.cl.GC || []).map(w => w[1]));
+        for (const [rid, d] of dayRows) dayRows.set(rid, gc.has(rid) ? D : Math.min(D, ended ? d + 1 : d));
+        for (const rid of gc) if (rid >= 0 && !dayRows.has(rid)) dayRows.set(rid, D);
+      }
+      for (const [rid, d] of dayRows) RS(rid).days += d;
+    }
+    return { riders: R, teams: T };
+  }
+
+  G.MCBuild = { Compactor, ingest, seasonTotals };
 })(typeof window !== 'undefined' ? window : globalThis);
