@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-// Actualiza los datos de la web a partir del foro Managercycling.
+// Actualiza los datos de la web.
 //
-// 1. Guarda cada tema del foro tal cual en raw/<año>/<tipo>-<id>.json.gz
-//    (solo descarga los temas nuevos o con respuestas nuevas).
+// 0. Desde 2026 los resultados salen de la web oficial (managercycling-web.vercel.app): raw/oficial/<año>/.
+// 1. Del foro guarda cada tema tal cual en raw/<año>/<tipo>-<id>.json.gz (resultados de temporadas
+//    anteriores e inscripciones); solo descarga los temas nuevos o con respuestas nuevas.
 // 2. Reconstruye data/ entero desde raw/ con el analizador actual, así
 //    cualquier mejora del analizador se aplica también a temporadas pasadas.
 //
@@ -17,6 +18,7 @@ const here = __dirname;
 require(path.join(here, 'mcparse.js'));
 require(path.join(here, 'build.js'));
 require(path.join(here, 'forum.js'));
+require(path.join(here, 'official.js'));
 
 const ROOT = path.resolve(here, '..');
 const DATA = path.join(ROOT, 'data');
@@ -50,123 +52,94 @@ async function download(F, y, kind, topics) {
   return true;
 }
 
-// ---------- clasificación oficial (web de Managercycling) ----------
-// La web oficial publica la clasificación de corredores, la de equipos, los días de competición y qué
-// pruebas/etapas ya tiene cargadas. Cada ejecución la descarga (raw/oficial-<año>.json) y calcula un ajuste:
-//   total mostrado = oficial + lo que el foro tiene y la oficial todavía no (pruebas o etapas posteriores)
-// Así la web cuadra con la oficial (abandonos, cronos por equipos, correcciones…) y sigue sumando sola.
-const OFFICIAL = cfg.official || 'https://managercycling-web.vercel.app';
-function rscArray(html, key, must) {
-  const t = html.replace(/\\\\"/g, '"').replace(/\\"/g, '"');
-  let from = 0;
-  for (;;) {
-    const i = t.indexOf('"' + key + '":[', from); if (i < 0) return null;
-    let d = 0, j = i + key.length + 3;
-    for (; j < t.length; j++) { const c = t[j]; if (c === '[') d++; else if (c === ']') { d--; if (!d) break; } }
-    const s = t.slice(i + key.length + 3, j + 1);
-    if (!must || s.includes(must)) { try { return { v: JSON.parse(s), t }; } catch (e) { /* sigue */ } }
-    from = j;
-  }
-}
-async function fetchOfficial(season) {
-  const get = async u => { const r = await fetch(OFFICIAL + u, { headers: { 'user-agent': 'managercycling-stats' }, signal: AbortSignal.timeout(60000) }); if (!r.ok) throw new Error(u + ' ' + r.status); return r.text(); };
-  const rid = rscArray(await get('/clasificaciones/ciclistas'), 'rows', '"cyclist"');
-  const tm = rscArray(await get('/clasificaciones'), 'rows', '"team"');
-  const ev = rscArray(await get('/resultados'), 'events', '"classifications"');
-  if (!rid || !tm || !ev || rid.v.length < 100) throw new Error('formato inesperado');
-  const prov = (rid.t.match(/"sourceDate":"([^"]+)"/) || [])[1] || null;
-  const o = { season, at: new Date().toISOString(), src: OFFICIAL, sourceDate: prov,
-    riders: rid.v.map(r => [r.cyclist, r.team, r.points, r.daysCompetition]),
-    teams: tm.v.map(r => [r.team, r.points]),
-    events: ev.v.map(e => [e.event, e.classifications.map(c => c.name)]) };
-  const f = path.join(RAW, `oficial-${season}.json`);
-  const prev = fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '';
-  const strip = x => JSON.stringify({ ...x, at: null });
-  if (!prev || strip(JSON.parse(prev)) !== strip(o)) { fs.mkdirSync(RAW, { recursive: true }); fs.writeFileSync(f, JSON.stringify(o)); console.log(`Clasificación oficial ${season} descargada: ${o.riders.length} corredores, ${o.events.length} pruebas.`); }
-  else console.log(`Clasificación oficial ${season} sin cambios.`);
+// ---------- web oficial de Managercycling ----------
+// Desde la temporada OFFICIAL_FROM los resultados salen sólo de https://managercycling-web.vercel.app: cada prueba con
+// todas sus clasificaciones, puntos y días, tal y como cuentan para la oficial. Se guarda una copia en
+// raw/oficial/<año>/ (un archivo por prueba, así sólo cambian las pruebas que la web modifica).
+const OFFICIAL = cfg.official || MCOfficial.BASE;
+const OFFICIAL_FROM = +(cfg.officialFrom || 2026);
+const offDir = y => path.join(RAW, 'oficial', String(y));
+const gzWrite = (f, s) => fs.writeFileSync(f, zlib.gzipSync(s, { level: 9 }));
+const gzRead = f => zlib.gunzipSync(fs.readFileSync(f)).toString('utf8');
+
+function readOfficial(y) {
+  const dir = offDir(y), ixf = path.join(dir, 'index.json');
+  if (!fs.existsSync(ixf)) return null;
+  const ix = JSON.parse(fs.readFileSync(ixf, 'utf8'));
+  ix.events = ix.events.map(([e, n, type, category]) => {
+    const f = path.join(dir, `e-${e}.json.gz`);
+    return { e, n, type, category, rows: fs.existsSync(f) ? JSON.parse(gzRead(f)) : [] };
+  });
+  return ix;
 }
 
-function officialAdjust(data) {
-  const out = {};
-  if (!fs.existsSync(RAW)) return out;
-  for (const f of fs.readdirSync(RAW).filter(f => /^oficial-\d{4}\.json$/.test(f))) {
-    const off = JSON.parse(fs.readFileSync(path.join(RAW, f), 'utf8'));
-    const y = +off.season;
-    if (!data.seasons.includes(y)) continue;
-    const key = n => MC.riderKey(String(n));
-    // la parte de la temporada que la oficial ya tiene cargada
-    const evs = new Map(off.events.map(([n, cls]) => [key(n), new Set(cls)]));
-    const races = [];
-    for (const r of data.races) {
-      if (r.s !== y) continue;
-      const cls = evs.get(key(r.name)); if (!cls) continue;
-      const c = JSON.parse(JSON.stringify(r));
-      if (!r.multi) { if (!cls.has('Clásica')) c.st = []; }
-      else {
-        const k = [...cls].filter(x => /^Etapa \d/.test(x)).length;
-        const order = [...new Set(r.st.map(s => Math.floor(s.n)))].sort((a, b) => a - b);
-        const keep = new Set(order.slice(0, k));
-        c.st = r.st.filter(s => keep.has(Math.floor(s.n)));
-        if (c.cl.LDR && k < order.length) { const last = Math.max(...keep); c.cl.LDR = c.cl.LDR.filter(w => w[0] <= last); }
-        if (k < order.length) c.end = '9999-12-31';
-      }
-      for (const [ck, on] of [['GC', 'General'], ['PTS', 'Regularidad'], ['KOM', 'Montaña'], ['YOU', 'Jóvenes'], ['TEAM', 'Equipos']]) if (c.cl[ck] && !cls.has(on)) delete c.cl[ck];
-      races.push(c);
-    }
-    const bt = MCBuild.seasonTotals({ ...data, races }, y), nt = MCBuild.seasonTotals(data, y);
-    const lev = (a, b) => { const d = []; for (let i = 0; i <= a.length; i++) { d[i] = [i]; for (let j = 1; j <= b.length; j++) d[i][j] = i ? Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)) : j; } return d[a.length][b.length]; };
-    const active = [...nt.riders.keys()];
-    const byKey = new Map(), byTok = new Map();
-    for (const i of active.concat(data.riders.map((_, i) => i))) { const n = data.riders[i][0]; if (!byKey.has(MC.riderKey(n))) byKey.set(MC.riderKey(n), i); if (!byTok.has(MC.tokenKey(n))) byTok.set(MC.tokenKey(n), i); }
-    const findRider = name => {
-      const n = MC.norm(String(name).replace(/\(J\)/gi, ''));
-      let id = byKey.get(MC.riderKey(n)); if (id != null) return id;
-      id = byTok.get(MC.tokenKey(n)); if (id != null) return id;
-      const tk = MC.tokenKey(n); let best = -1, bd = 3;
-      for (const i of active) { const k = MC.tokenKey(data.riders[i][0]); if (Math.abs(k.length - tk.length) > 2) continue; const d = lev(tk, k); if (d < bd) { bd = d; best = i; } }
-      return bd <= (tk.length > 12 ? 2 : 1) ? best : -1;
-    };
-    const r = {}, seen = new Set();
-    let matched = 0;
-    for (const [name, team, pts, days] of off.riders) {
-      const id = findRider(name); if (id < 0) continue;
-      matched++; seen.add(id);
-      const b = bt.riders.get(id) || { pts: 0, days: 0 };
-      const c = r[id] || [0, 0]; c[0] += (pts || 0) - b.pts; c[1] += (days || 0) - b.days; r[id] = c;
-    }
-    for (const [id, b] of bt.riders) if (!seen.has(id) && (b.pts || b.days)) r[id] = [-b.pts, -b.days];
-    for (const k of Object.keys(r)) { r[k] = [Math.round(r[k][0] * 1e4) / 1e4, r[k][1]]; if (Math.abs(r[k][0]) < 0.005 && !r[k][1]) delete r[k]; }
-    const sig = n => MC.norm(n).toLowerCase().split(/[\s\-|/]+/).filter(w => w && !/^(team|cycling|pro|procycling|the|de|-)$/.test(w)).slice(0, 2).join(' ');
-    const tpool = [...nt.teams.keys()];
-    const findTeam = name => { const k = MC.teamKey(name); for (const t of tpool) if (MC.teamKey(data.teams[t]) === k) return t; const g = sig(name); for (const t of tpool) if (sig(data.teams[t]) === g) return t; return -1; };
-    const t = {};
-    for (const [name, pts] of off.teams || []) { const id = findTeam(name); if (id < 0) continue; const v = Math.round((pts - (bt.teams.get(id) || 0)) * 1e4) / 1e4; if (Math.abs(v) >= 0.005) t[id] = v; }
-    out[y] = { at: off.at, src: off.src, sourceDate: off.sourceDate, r, t };
-    console.log(`Clasificación oficial ${y}: ${matched}/${off.riders.length} corredores enlazados, ${races.length} pruebas en común, ${Object.keys(r).length} ajustes de corredor, ${Object.keys(t).length} de equipo.`);
+async function fetchOfficial(season) {
+  const get = async u => { const r = await fetch(OFFICIAL + u, { headers: { 'user-agent': 'managercycling-stats' }, signal: AbortSignal.timeout(90000) }); if (!r.ok) throw new Error(u + ' ' + r.status); return r.text(); };
+  const prev = readOfficial(season);
+  const res = await MCOfficial.fetchSeason({ base: OFFICIAL, season, get, getJSON: async u => JSON.parse(await get(u)), meta: prev ? prev.meta : {}, log: m => console.log('  ' + m) });
+  if (res.events.length < 1 || res.events.reduce((a, e) => a + e.rows.length, 0) < 100) throw new Error('la web oficial no trae resultados');
+  const dir = offDir(season); fs.mkdirSync(dir, { recursive: true });
+  let changed = 0;
+  const keep = new Set();
+  for (const ev of res.events) {
+    const f = path.join(dir, `e-${ev.e}.json.gz`), s = JSON.stringify(ev.rows);
+    keep.add(path.basename(f));
+    if (fs.existsSync(f) && gzRead(f) === s) continue;
+    gzWrite(f, s); changed++;
   }
-  return out;
+  for (const f of fs.readdirSync(dir)) if (/^e-\d+\.json\.gz$/.test(f) && !keep.has(f)) { fs.unlinkSync(path.join(dir, f)); changed++; }
+  const ix = { season, src: res.src, sourceDate: res.sourceDate, events: res.events.map(e => [e.e, e.n, e.type, e.category, e.rows.length]), meta: res.meta, rank: res.rank };
+  const ixf = path.join(dir, 'index.json');
+  const old = fs.existsSync(ixf) ? JSON.parse(fs.readFileSync(ixf, 'utf8')) : null;
+  if (changed || !old || JSON.stringify({ ...old, at: null }) !== JSON.stringify({ ...ix, at: null })) {
+    ix.at = new Date().toISOString();
+    fs.writeFileSync(ixf, JSON.stringify(ix));
+  }
+  console.log(`Web oficial ${season}: ${res.events.length} pruebas, ${res.events.reduce((a, e) => a + e.rows.length, 0)} filas, ${changed} pruebas nuevas o cambiadas.`);
+}
+
+// comprobación: los totales que calcula la web deben ser los de las clasificaciones oficiales
+function checkOfficial(data, off) {
+  if (!off.rank) return;
+  const tot = MCBuild.seasonTotals(data, off.season);
+  const byOid = new Map(Object.entries(data.oid || {}).map(([k, v]) => [v, +k]));
+  let bad = 0, ex = [];
+  for (const [oid, name, pts, days] of off.rank.riders) {
+    const o = tot.riders.get(byOid.get(oid)) || { pts: 0, days: 0 };
+    if (Math.abs(o.pts - pts) > 0.01 || o.days !== days) { bad++; if (ex.length < 5) ex.push(`${name} ${o.pts}/${pts} pts ${o.days}/${days} días`); }
+  }
+  const tName = new Map(); for (const ev of off.events) for (const x of ev.rows) if (x[4] != null && x[5]) tName.set(x[4], x[5]);
+  let tbad = 0;
+  for (const [tid, name, pts] of off.rank.teams) { const id = data.teams.findIndex(t => MC.teamKey(t) === MC.teamKey(tName.get(tid) || name)); const v = tot.teams.get(id) || 0; if (Math.abs(v - pts) > 0.5) { tbad++; if (ex.length < 8) ex.push(`${name} ${v}/${pts}`); } }
+  console.log(`Comprobación ${off.season} con la clasificación oficial: ${off.rank.riders.length - bad}/${off.rank.riders.length} corredores y ${off.rank.teams.length - tbad}/${off.rank.teams.length} equipos cuadran${ex.length ? ' · ' + ex.join(' · ') : ''}.`);
 }
 
 function rebuild() {
   const comp = MCBuild.Compactor();
   const years = fs.existsSync(RAW) ? fs.readdirSync(RAW).filter(d => /^\d{4}$/.test(d)).sort() : [];
   let n = 0;
+  const offs = [];
+  for (const y of years) if (+y >= OFFICIAL_FROM) { const o = readOfficial(+y); if (o) offs.push(o); }
+  const offY = new Set(offs.map(o => String(o.season)));
   for (const y of years) {
-    const files = fs.readdirSync(path.join(RAW, y)).filter(f => f.endsWith('.json.gz')).sort((a, b) => (+a.match(/\d+/)[0]) - (+b.match(/\d+/)[0]));
+    // temporadas con web oficial: del foro sólo las inscripciones (calendario, inscritos, fotos)
+    const files = fs.readdirSync(path.join(RAW, y)).filter(f => f.endsWith('.json.gz') && !(offY.has(y) && f.startsWith('res-'))).sort((a, b) => (+a.match(/\d+/)[0]) - (+b.match(/\d+/)[0]));
     const topics = files.map(f => JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(RAW, y, f))).toString('utf8')));
     MCBuild.ingest(comp, topics, { onError: (x, e) => console.log('No se pudo leer', x.t.title, e.message) });
     n += topics.length;
   }
+  for (const o of offs) comp.addOfficialSeason(o);
   const data = comp.finish({ generated: new Date().toISOString() });
   fs.mkdirSync(DATA, { recursive: true });
   for (const f of fs.readdirSync(DATA)) if (/^s\d{4}\.json$/.test(f) && !data.seasons.includes(+f.slice(1, 5))) fs.unlinkSync(path.join(DATA, f));
-  const adj = officialAdjust(data);
+  for (const o of offs) checkOfficial(data, o);
+  const offInfo = Object.fromEntries(offs.map(o => [o.season, { at: o.at, src: o.src, sourceDate: o.sourceDate }]));
   for (const s of data.seasons) {
     const part = { races: data.races.filter(r => r.s === s), ins: data.ins.filter(i => i.s === s) };
-    if (adj[s]) part.adj = adj[s];
+    if (offInfo[s]) part.official = offInfo[s];
     fs.writeFileSync(path.join(DATA, `s${s}.json`), JSON.stringify(part));
   }
-  const core = { v: data.v, generated: data.generated, seasons: data.seasons, teams: data.teams, riders: data.riders };
+  const core = { v: data.v, generated: data.generated, seasons: data.seasons, teams: data.teams, riders: data.riders, oid: data.oid, offSeasons: data.offSeasons };
   fs.writeFileSync(path.join(DATA, 'core.json'), JSON.stringify(core));
   console.log(`Datos reconstruidos desde ${n} temas: ${data.races.length} carreras, ${data.ins.length} inscripciones, ${data.riders.length} corredores.`);
 }
@@ -181,6 +154,7 @@ function rebuild() {
       console.log(`Temporada ${s.year}${isCurrent ? ' (actual)' : ''}`);
       let complete = true;
       for (const [kind, fid] of [['res', s.res], ['ins', s.ins]]) {
+        if (kind === 'res' && s.year >= OFFICIAL_FROM) continue; // resultados: de la web oficial
         const known = t => index.topics[kind + '-' + t.id];
         const fresh = t => known(t) && known(t).r === t.replies;
         const stopAt = isCurrent && !FULL ? page => page.length > 0 && page.every(t => !/^\d/.test(t.title) || fresh(t)) : null;
@@ -216,7 +190,10 @@ function rebuild() {
     if (n) console.log(`  ${n} inscripciones revisadas`);
   }
   if (!ONLY_REBUILD && cfg.current) {
-    try { await fetchOfficial(cfg.current.year); } catch (e) { console.log('No se pudo leer la clasificación oficial:', e.message); }
+    for (const y of [...new Set([cfg.current.year, ...(cfg.seasons || []).map(s => s.year)])].filter(y => y >= OFFICIAL_FROM)) {
+      try { await fetchOfficial(y); } catch (e) { console.log(`No se pudo leer la web oficial (${y}): ${e.message}. Se mantiene la última copia guardada.`); }
+    }
+    const oldOff = path.join(RAW, `oficial-${cfg.current.year}.json`); if (fs.existsSync(oldOff)) fs.unlinkSync(oldOff);
   }
   // Topics saved before pictures were read: download them again, newest first, while time remains.
   if (!ONLY_REBUILD) {

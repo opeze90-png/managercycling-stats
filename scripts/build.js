@@ -71,6 +71,9 @@
       return name;
     };
     let curSeason = null;
+    const offSeasons = new Set(data.offSeasons || []);
+    // corredor ↔ id de la web oficial (cyclistId), para enlazar las fichas y no mezclar homónimos
+    const oidOf = new Map(Object.entries(data.oid || {}).map(([k, v]) => [+k, v])), ridOfOid = new Map([...oidOf].map(([k, v]) => [v, k]));
     const markYoung = id => { if (curSeason && !data.riders[id].includes(curSeason, 1)) data.riders[id].push(curSeason); };
     const touch = (id, name) => {
       const clean = MC.norm(name.replace(/\(J\)/gi, ''));
@@ -256,6 +259,7 @@
       for (const [k, m] of bySeason) {
         if (m.size < 2) continue;
         const s = +k.split('|')[0];
+        if (offSeasons.has(s)) continue;
         const ids = [...m.keys()];
         const together = data.races.some(r => r.s === s && (() => { const ts = new Set(r.st.flatMap(x => x.rows.map(w => w[2]))); return ids.filter(t => ts.has(t)).length > 1; })());
         if (together) continue;
@@ -331,8 +335,10 @@
         if (![...teams[i]].some(t => teams[j].has(t))) continue;
         if ([...races[i]].some(r => races[j].has(r))) continue;
         const ri = find(i), rj = find(j); if (ri === rj) continue;
+        if (oidOf.has(ri) && oidOf.has(rj) && oidOf.get(ri) !== oidOf.get(rj)) continue; // dos corredores distintos en la web oficial
         if (G.MC_LOG_MERGE) console.log("merge", data.riders[i][0], "=", data.riders[j][0]);
-        if (refs[ri] >= refs[rj]) parent[rj] = ri; else parent[ri] = rj;
+        if (oidOf.has(rj) && !oidOf.has(ri)) parent[ri] = rj; else if (oidOf.has(ri) && !oidOf.has(rj)) parent[rj] = ri;
+        else if (refs[ri] >= refs[rj]) parent[rj] = ri; else parent[ri] = rj;
       }
       // riders only seen in inscriptions, misspelled: attach them to the one rider with results that is close enough
       const withRes = keys.map((k, i) => i).filter(i => refs[i] > 0 && keys[i].length > 6);
@@ -358,6 +364,9 @@
       for (const r of data.races) if (r.ld) for (const k in r.ld) r.ld[k] = re(r.ld[k]);
       for (const i of data.ins) for (const e of i.e) e.r = e.r.map(re).filter(v => v >= 0);
       data.riders = riders; votes.length = 0; votes.push(...nv);
+      const om = [...oidOf]; oidOf.clear(); ridOfOid.clear();
+      for (const [i, o] of om) { const n = re(find(i)); if (n >= 0) { oidOf.set(n, o); ridOfOid.set(o, n); } }
+      for (const r of data.races) if (r.dy) { const d = {}; for (const [k, v] of Object.entries(r.dy)) { const n = re(find(+k)); if (n >= 0) d[n] = (d[n] || 0) + v; } r.dy = d; }
       riderId.clear(); tokId.clear();
       data.riders.forEach((r, i) => { riderId.set(MC.riderKey(r[0]), i); tokId.set(MC.tokenKey(r[0]), i); });
     }
@@ -382,6 +391,76 @@
         if (!o.st.length && !Object.keys(o.cl).length) return;
         upsert(data.races, o);
       },
+      // Temporada entera desde la web oficial (scripts/official.js): off = {season, events:[{e, n, type, category, rows}], meta}
+      // fila oficial = [clasificación, puesto, idCorredor, nombre, idEquipo, equipo, puntos, días, tiempo, perfil]
+      addOfficialSeason(off) {
+        const season = +off.season;
+        offSeasons.add(season); curSeason = season;
+        data.races = data.races.filter(r => r.s !== season); // lo del foro de esa temporada no se usa
+        // nombre de cada equipo oficial: el de su última prueba (los cambios de nombre siguen siendo un equipo)
+        const tName = new Map();
+        for (const ev of off.events) for (const x of ev.rows) if (x[4] != null && x[5]) tName.set(x[4], x[5]);
+        const tOf = new Map();
+        const T = t => { if (t == null) return -1; if (!tOf.has(t)) { const n = tName.get(t), id = tid(n); if (id >= 0 && n) { data.teams[id] = n; teamId.set(MC.teamKey(n), id); } tOf.set(t, id); } return tOf.get(t); };
+        const claimed = new Set(ridOfOid.values());
+        const R = (oid, name) => {
+          if (oid == null || !name) return -1;
+          let id = ridOfOid.get(oid);
+          if (id == null) {
+            const clean = stripTeam(cleanName(name));
+            id = rid(name, false);
+            if (id >= 0 && claimed.has(id)) id = -1;
+            if (id < 0) { const f = fuzzy(clean); if (f >= 0 && !claimed.has(f)) id = f; }
+            if (id < 0) { id = data.riders.length; data.riders.push([MC.norm(clean.replace(/\(J\)/gi, ''))]); votes.push({}); if (!riderId.has(MC.riderKey(clean))) riderId.set(MC.riderKey(clean), id); if (!tokId.has(MC.tokenKey(clean))) tokId.set(MC.tokenKey(clean), id); }
+            ridOfOid.set(oid, id); oidOf.set(id, oid); claimed.add(id);
+            const on = MC.norm(clean.replace(/\(J\)/gi, '')); votes[id][on] = (votes[id][on] || 0) + 1e4; // el nombre de la web oficial manda
+          }
+          touch(id, stripTeam(cleanName(name)));
+          return id;
+        };
+        const ISO = { it: 'ITA', fr: 'FRA', be: 'BEL', es: 'ESP', nl: 'NED', pt: 'POR', cn: 'CHN', pl: 'POL', de: 'GER', ch: 'SWI', gr: 'GRE', tr: 'TUR', au: 'AUS', dk: 'DEN', cz: 'CZE', nz: 'NZL', cl: 'CHI', ie: 'IRL', by: 'BLR', hr: 'CRO', uz: 'UZB', at: 'AUT', lu: 'LUX', no: 'NOR', si: 'SLO', us: 'USA', ca: 'CAN', co: 'COL', ae: 'UAE', rw: 'RWA', tw: 'TWN', th: 'THA', hu: 'HUN', ir: 'IRN', ee: 'EST', mu: 'MUS', ro: 'ROM', kr: 'KOR', gb: 'GBR', sk: 'SVK', my: 'MAS', jp: 'JPN', ar: 'ARG', br: 'BRA', mx: 'MEX', ec: 'ECU', ve: 'VEN', za: 'RSA', ma: 'MAR', dz: 'ALG', eg: 'EGY', er: 'ERI', et: 'ETH', kz: 'KAZ', ru: 'RUS', ua: 'UKR', se: 'SWE', fi: 'FIN', lv: 'LAT', lt: 'LTU', rs: 'SRB', ba: 'BIH', me: 'MNE', mk: 'MKD', al: 'ALB', bg: 'BUL', md: 'MDA', ge: 'GEO', am: 'ARM', az: 'AZE', il: 'ISR', sa: 'SAU', om: 'OMA', qa: 'QAT', bh: 'BRN', kw: 'KUW', jo: 'JOR', in: 'IND', id: 'INA', ph: 'PHI', vn: 'VIE', sg: 'SGP', hk: 'HKG', mn: 'MGL', cr: 'CRC', gt: 'GUA', pa: 'PAN', pr: 'PUR', do: 'DOM', cu: 'CUB', jm: 'JAM', uy: 'URU', py: 'PAR', bo: 'BOL', pe: 'PER', cm: 'CMR', bj: 'BEN', ci: 'CIV', gh: 'GHA', ke: 'KEN', ug: 'UGA', tn: 'TUN', sm: 'SMR', ad: 'AND', mc: 'MON', li: 'LIE', mt: 'MLT', cy: 'CYP', is: 'ISL' };
+        const SEC = { 'General': 'GC', 'Regularidad': 'PTS', 'Montaña': 'KOM', 'Jóvenes': 'YOU', 'Equipos': 'TEAM' };
+        const addDays = (n, d) => n + d;
+        const fw = n => MC.riderKey(n).split(' ')[0];
+        let lastDate = null;
+        for (const ev of off.events) {
+          const m = (off.meta || {})[ev.e] || [];
+          const start = m[0] || lastDate; if (m[0]) lastDate = m[0];
+          const fl = String(m[2] || '').toLowerCase();
+          const ins = data.ins.find(i => i.s === season && i.start === start && fw(i.name) === fw(ev.n)) || data.ins.find(i => i.s === season && i.start === start && MC.riderKey(i.name).includes(MC.riderKey(ev.n).split(' ').slice(0, 2).join(' ')));
+          const multi = ev.rows.some(x => /^Etapa\s/.test(x[0]) || x[0] === 'General');
+          const o = { id: 900000 + ev.e, o: ev.e, s: season, name: ev.n, start, end: null, c: ISO[fl] || ISO[fl.split('-')[0]] || (/^[A-Z]{3}$/.test(m[3] || '') ? m[3] : (ins && ins.c) || undefined), cls: m[1] || (ins && ins.cls) || undefined, multi: multi ? 1 : 0, rp: ev.rows.length, st: [], cl: {}, dy: {} };
+          const stages = new Map(), ld = {};
+          for (const x of ev.rows) {
+            const [c, p, oid, name, t, , pts, days, time, prof] = x;
+            const r = oid != null ? R(oid, name) : -1, tt = T(t);
+            if (r >= 0 && days) o.dy[r] = (o.dy[r] || 0) + days;
+            const num = typeof p === 'number' ? p : /^\d+$/.test(String(p)) ? +p : null;
+            if (/^(Clásica|Etapa\s*\d+)/.test(c)) {
+              const n = c === 'Clásica' ? 0 : +c.match(/\d+/)[0];
+              if (/^l[ií]der$/i.test(String(p))) { if (r >= 0) { ld[n] = r; (o.cl.LDR = o.cl.LDR || []).push([n, r, tt, '', pts]); } continue; }
+              if (num == null) continue; // abandonos: cuentan los días, no salen en la clasificación
+              if (!stages.has(n)) stages.set(n, { n, l: c === 'Clásica' ? 'Resultado' : 'Etapa ' + n, ty: prof || undefined, rows: [] });
+              const s = stages.get(n); if (!s.ty && prof) s.ty = prof;
+              s.rows.push([num, r, tt, time || '', pts]);
+            } else if (SEC[c]) {
+              if (num == null) continue;
+              (o.cl[SEC[c]] = o.cl[SEC[c]] || []).push([num, SEC[c] === 'TEAM' ? -1 : r, tt, time || '', pts]);
+            }
+          }
+          o.st = [...stages.values()].sort((a, b) => a.n - b.n);
+          if (Object.keys(ld).length) o.ld = ld;
+          if (!Object.keys(o.dy).length) delete o.dy;
+          if (multi && start) {
+            if (ins && ins.end && ins.end >= start) o.end = ins.end;
+            else { const N = o.st.length || 1; const d = new Date(start + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + addDays(N - 1, N >= 21 ? 2 : 0)); o.end = d.toISOString().slice(0, 10); }
+          }
+          if (ins && ins.im) o.im = ins.im;
+          if (!o.st.length && !Object.keys(o.cl).length) continue;
+          data.races.push(o);
+        }
+        data.offSeasons = [...offSeasons].sort();
+      },
       addIns(i, replies) {
         curSeason = seasonOf(i);
         const o = { id: i.id, s: seasonOf(i), name: i.name, start: i.start, end: i.end, c: i.country, cls: i.cls, note: i.note || undefined, im: i.im || undefined, sc: i.sc || undefined, scr: i.scRest || undefined, closed: i.closed ? 1 : 0, rp: replies, min: i.minR, max: i.maxR,
@@ -397,8 +476,9 @@
       },
       finish(meta) {
         mergeDuplicates();
-        mergeTeamRenames();
-        fillScales();
+        // las reglas para completar lo que el foro no publica no tocan lo que viene de la web oficial
+        const all = data.races; data.races = all.filter(r => !r.o);
+        try { mergeTeamRenames(); fillScales(); } finally { data.races = all; }
         data.riders.forEach((r, i) => {
           const v = Object.entries(votes[i] || {}).map(([n, c]) => [n, c * capsPenalty(n)]).sort((a, b) => b[1] - a[1] || b[0].length - a[0].length);
           if (v.length) r[0] = v[0][0];
@@ -409,6 +489,8 @@
         data.races.sort((a, b) => (a.start || '').localeCompare(b.start || '') || a.id - b.id);
         data.ins.sort((a, b) => (a.start || '').localeCompare(b.start || '') || a.id - b.id);
         data.seasons = [...new Set(data.races.map(r => r.s).concat(data.ins.map(i => i.s)).filter(Boolean))].sort();
+        if (oidOf.size) data.oid = Object.fromEntries([...oidOf].sort((a, b) => a[0] - b[0]));
+        if (offSeasons.size) data.offSeasons = [...offSeasons].sort();
         if (meta) Object.assign(data, meta);
         return data;
       }
@@ -439,7 +521,8 @@
       for (const k of ['GC', 'PTS', 'KOM', 'YOU', 'LDR']) (r.cl[k] || []).forEach(add);
       (r.cl.TEAM || []).forEach(([p, rid, tid, v, pts]) => { if (tid >= 0 && pts) T.set(tid, (T.get(tid) || 0) + pts); });
       const dayRows = new Map();
-      if (/^(WC|OG)\./.test(r.cls || '')) { /* no cuentan */ }
+      if (r.dy) { for (const [k, d] of Object.entries(r.dy)) dayRows.set(+k, d); } // días tal y como los da la web oficial
+      else if (/^(WC|OG)\./.test(r.cls || '')) { /* no cuentan */ }
       else if (!r.multi) {
         r.st.forEach(s => s.rows.forEach(w => { if (w[1] >= 0) dayRows.set(w[1], 1); }));
         for (const k of ['GC', 'PTS', 'KOM', 'YOU', 'LDR']) (r.cl[k] || []).forEach(w => { if (w[1] >= 0) dayRows.set(w[1], 1); });
