@@ -1306,6 +1306,7 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
             if (id < 0) { const f = fuzzy(clean); if (f >= 0 && !claimed.has(f)) id = f; }
             if (id < 0) { id = data.riders.length; data.riders.push([MC.norm(clean.replace(/\(J\)/gi, ''))]); votes.push({}); if (!riderId.has(MC.riderKey(clean))) riderId.set(MC.riderKey(clean), id); if (!tokId.has(MC.tokenKey(clean))) tokId.set(MC.tokenKey(clean), id); }
             ridOfOid.set(oid, id); oidOf.set(id, oid); claimed.add(id);
+            const on = MC.norm(clean.replace(/\(J\)/gi, '')); votes[id][on] = (votes[id][on] || 0) + 1e4; // el nombre de la web oficial manda
           }
           touch(id, stripTeam(cleanName(name)));
           return id;
@@ -2428,7 +2429,7 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
     <section class="card prose">
       <p>ManagerCycling Stats ordena por corredor, equipo y carrera los resultados de Managercycling. ${Object.keys(D.official || {}).length ? `Desde ${Object.keys(D.official).sort()[0]} los resultados (todas las clasificaciones, puntos y días de competición) salen de la <a href="${OFFWEB}/resultados" target="_blank" rel="noopener">web oficial de Managercycling</a>; las temporadas anteriores, de los temas de RESULTADOS del foro. ` : ''}Del <a href="${FORUM}" target="_blank" rel="noopener">foro</a> se leen también las inscripciones de los mánagers (calendario, inscritos y fotos de las carreras).</p>
       <p>Los <strong>puntos MC</strong> son los puntos Managercycling de cada carrera (etapas, clásicas y clasificaciones finales): los de la web oficial y, en temporadas anteriores, los que el foro publica en el resumen de cada carrera.</p>
-      <p>Datos guardados: ${g ? g.toLocaleString('es-ES') : 'sin fecha'}. Temporadas: ${IX.seasons.slice().reverse().join(', ')}. Los datos se actualizan solos cada hora desde la web oficial y el foro.</p>
+      <p>Datos guardados: ${g ? g.toLocaleString('es-ES') : 'sin fecha'}. Temporadas: ${IX.seasons.slice().reverse().join(', ')}. Un servidor se conecta con la web oficial cada 10 minutos y guarda lo nuevo; el botón <strong>Actualizar</strong> (y la propia web, cada 5 minutos mientras está abierta) carga al momento lo último que haya traído.</p>
       <p>Los puntos de cada corredor incluyen etapas, clásicas, clasificaciones finales, los puntos por ir de líder y su parte de las contrarrelojes por equipos (los puntos del equipo se reparten entre sus corredores). Los <strong>puntos de equipo</strong> son la suma de los de sus corredores más la clasificación por equipos.</p>
       <p>Cada corredor puede competir como máximo <strong>${MAX_DAYS} días por temporada</strong>. Una clásica cuenta un día; en una vuelta cuentan las etapas que disputa, incluida aquella en la que abandona, y un doble sector cuenta como un solo día. En las fichas y en el ranking se muestran los días ya corridos y, aparte, los de las carreras en las que su mánager ya lo ha inscrito; en rojo si la suma supera el máximo.</p>
       <p><strong>Web oficial.</strong> ${Object.entries(D.official || {}).map(([y, x]) => `Temporada ${y}: datos de la web oficial guardados el ${new Date(x.at).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' })}${x.sourceDate ? ` (clasificación oficial del ${new Date(x.sourceDate).toLocaleDateString('es-ES')})` : ''}.`).join(' ') || 'Sin datos de la web oficial.'} Los totales de corredores y equipos son exactamente los de la <a href="${OFFWEB}/clasificaciones" target="_blank" rel="noopener">clasificación oficial</a>, abandonos y cronos por equipos incluidos.</p>
@@ -2588,6 +2589,13 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
   }
   const hhmm = d => d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
   const dataLabel = () => { const g = D.generated ? new Date(D.generated) : null; return g ? `Datos del ${g.toLocaleDateString('es-ES')} ${hhmm(g)}` : 'Datos guardados'; };
+  // última novedad de la web oficial que ya está en los datos (el servidor la comprueba cada 10 minutos)
+  const offLabel = fresh => {
+    const ys = Object.keys(D.official || {}); if (!ys.length) return '';
+    const a = new Date(D.official[Math.max(...ys)].at); if (isNaN(a)) return '';
+    const day = a.toDateString() === new Date().toDateString() ? hhmm(a) : `${a.toLocaleDateString('es-ES', { day: 'numeric', month: 'numeric' })} ${hhmm(a)}`;
+    return `${fresh ? 'Datos nuevos de la web oficial' : 'Al día con la web oficial'} (${day})`;
+  };
   let updating = false;
   function setBtn(busy) { const b = $('#refresh'); if (b) { b.disabled = busy; b.classList.toggle('busy', busy); } }
   // Newer snapshot published (GitHub Action)? Reload the data files.
@@ -2603,12 +2611,15 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
     if (updating || !window.MCForum || CONFIG.live === false) return;
     updating = true; setBtn(true);
     try {
-      if (manual) { setLive('busy', 'Buscando datos nuevos…'); if (await refreshSnapshot()) { state.scrollTop = false; route(); } }
-      await checkForum(manual);
+      if (manual) setLive('busy', 'Conectando con la web oficial…');
+      const fresh = await refreshSnapshot();
+      if (fresh) { state.scrollTop = false; route(); }
+      const forum = await checkForum(manual);
+      setLive(forum.err && !offLabel() ? 'off' : 'ok', [offLabel(fresh) || dataLabel(), forum.msg].filter(Boolean).join(' · '));
     } finally { updating = false; setBtn(false); }
   }
   async function checkForum(manual) {
-    setLive('busy', 'Comprobando el foro…');
+    setLive('busy', 'Comprobando inscripciones del foro…');
     const F = MCForum.Forum({ gap: 650, on429: 'stop', tries: 2 });
     const known = new Map();
     D.races.forEach(r => known.set('res' + r.id, r.rp));
@@ -2624,7 +2635,7 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
         const ts = await F.forumTopics(fid, { maxPages: 6, stopAt });
         for (const t of ts) if (/^\d/.test(t.title) && known.get(kind + t.id) !== t.replies) changed.push({ t, kind });
       }
-      if (!changed.length) { setLive('ok', `Al día con el foro · ${hhmm(new Date())}`); return; }
+      if (!changed.length) return { msg: '' };
       const todo = changed.slice(0, manual ? 80 : 40);
       const got = [];
       let n = 0;
@@ -2640,10 +2651,10 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
         rebuild(); state.scrollTop = false; route();
       }
       const left = changed.length - got.length;
-      setLive('ok', left > 0 ? `${got.length} temas actualizados · quedan ${left}, vuelve a pulsar Actualizar` : `${got.length} tema${got.length > 1 ? 's' : ''} nuevo${got.length > 1 ? 's' : ''} del foro · ${hhmm(new Date())}`);
+      return { msg: left > 0 ? `${got.length} inscripciones del foro actualizadas, quedan ${left}` : got.length ? `${got.length} inscripcion${got.length > 1 ? 'es' : ''} nueva${got.length > 1 ? 's' : ''} del foro` : '' };
     } catch (e) {
       const inClaude = /claude/i.test(location.hostname);
-      setLive('off', !manual ? dataLabel() : inClaude ? `Aquí dentro de Claude no se puede leer el foro: usa la web publicada · ${dataLabel()}` : `No se pudo conectar con el foro, prueba en un rato · ${dataLabel()}`);
+      return { err: 1, msg: manual && !inClaude ? 'foro no disponible ahora' : '' };
     }
   }
   document.addEventListener('click', e => { if (e.target.closest('#refresh')) liveUpdate(true); });
@@ -2663,6 +2674,8 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
     setLive('off', dataLabel());
     route();
     setTimeout(() => liveUpdate(false), 1200);
+    // mientras la web está abierta, carga sola lo que el servidor traiga de la web oficial
+    setInterval(() => { if (!updating && document.visibilityState === 'visible') refreshSnapshot().then(f => { if (f) { state.scrollTop = false; route(); setLive('ok', offLabel(true)); } }); }, 5 * 60000);
   }
   boot();
 })();
