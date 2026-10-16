@@ -14,6 +14,7 @@
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
+const crypto = require('crypto');
 const here = __dirname;
 require(path.join(here, 'mcparse.js'));
 require(path.join(here, 'build.js'));
@@ -114,6 +115,17 @@ function checkOfficial(data, off) {
   console.log(`Comprobación ${off.season} con la clasificación oficial: ${off.rank.riders.length - bad}/${off.rank.riders.length} corredores y ${off.rank.teams.length - tbad}/${off.rank.teams.length} equipos cuadran${ex.length ? ' · ' + ex.join(' · ') : ''}.`);
 }
 
+// huella de todo lo que entra en la reconstrucción: si no cambia, no se reescribe data/ (ni se hace commit)
+function inputsHash() {
+  const h = crypto.createHash('sha1');
+  const add = f => { if (fs.existsSync(f)) { h.update(f); h.update(fs.readFileSync(f)); } };
+  add(path.join(RAW, 'index.json'));
+  const od = path.join(RAW, 'oficial');
+  if (fs.existsSync(od)) for (const y of fs.readdirSync(od).sort()) add(path.join(od, y, 'index.json'));
+  for (const f of fs.readdirSync(here).sort()) if (/\.(js|json)$/.test(f)) add(path.join(here, f));
+  return h.digest('hex').slice(0, 16);
+}
+
 function rebuild() {
   const comp = MCBuild.Compactor();
   const years = fs.existsSync(RAW) ? fs.readdirSync(RAW).filter(d => /^\d{4}$/.test(d)).sort() : [];
@@ -139,7 +151,7 @@ function rebuild() {
     if (offInfo[s]) part.official = offInfo[s];
     fs.writeFileSync(path.join(DATA, `s${s}.json`), JSON.stringify(part));
   }
-  const core = { v: data.v, generated: data.generated, seasons: data.seasons, teams: data.teams, riders: data.riders, oid: data.oid, offSeasons: data.offSeasons };
+  const core = { v: data.v, generated: data.generated, inputs: inputsHash(), seasons: data.seasons, teams: data.teams, riders: data.riders, oid: data.oid, offSeasons: data.offSeasons };
   fs.writeFileSync(path.join(DATA, 'core.json'), JSON.stringify(core));
   console.log(`Datos reconstruidos desde ${n} temas: ${data.races.length} carreras, ${data.ins.length} inscripciones, ${data.riders.length} corredores.`);
 }
@@ -217,6 +229,9 @@ function rebuild() {
   if (missing.length && !ONLY_REBUILD && fs.existsSync(path.join(DATA, 'core.json'))) {
     console.log(`Aún faltan temas de ${missing.join(', ')}: se mantienen los datos actuales hasta tenerlo todo.`);
     return;
+  }
+  if (!ONLY_REBUILD) {
+    try { const core = JSON.parse(fs.readFileSync(path.join(DATA, 'core.json'), 'utf8')); if (core.inputs && core.inputs === inputsHash()) { console.log('Sin novedades en la web oficial ni en el foro: los datos siguen igual.'); return; } } catch (e) { /* reconstruir */ }
   }
   rebuild();
 })().catch(e => { console.error(e); process.exit(1); });
