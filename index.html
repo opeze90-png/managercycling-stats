@@ -319,6 +319,27 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
 .perfil a { display: block; margin-top: 8px; border-radius: 8px; overflow: hidden; border: 1px solid var(--line); background: var(--surface-2); }
 .perfil img { display: block; width: 100%; height: auto; }
 @media (max-width: 640px) { .t-hist .hj { display: none; } }
+
+/* Noticias */
+.nws { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 14px; margin-top: 14px; }
+.nw { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 14px 16px; min-width: 0; }
+.nw-big { grid-column: 1 / -1; border-top: 4px solid var(--gc); }
+.nw-big .nw-t { font-size: clamp(24px, 4vw, 34px); }
+.nw-meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 13px; }
+.nw-t { font-family: var(--f-display); font-weight: 700; font-size: 21px; line-height: 1.15; margin: 6px 0; text-wrap: balance; }
+.nw-t a { color: var(--ink); }
+.nw-b { margin: 0; line-height: 1.5; }
+.nw-tag { display: inline-block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: 1px 6px; border-radius: 4px; background: var(--surface-2); color: var(--muted); border: 1px solid var(--line); }
+.nw-race .nw-tag, .nw-tag.nw-race { background: var(--bar); color: var(--gc); border-color: var(--bar); }
+.nw-tag.nw-vuelta { background: var(--gc); color: #15120a; border-color: var(--gc); }
+.nw-tag.nw-rank { background: var(--pts); color: #08210f; border-color: var(--pts); }
+.nw-tag.nw-rec { background: var(--kom); color: #fff; border-color: var(--kom); }
+.nwl { list-style: none; margin: 0; padding: 0; }
+.nwl li { padding: 8px 0; border-bottom: 1px solid var(--line); line-height: 1.3; }
+.nwl li:last-child { border-bottom: 0; }
+.nwl a { color: var(--ink); font-weight: 600; }
+.center { text-align: center; }
+.btn-more { display: inline-block; margin-top: 14px; padding: 8px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
 </style>
 
 <header class="bar">
@@ -326,6 +347,7 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
     <a class="logo" href="#inicio">ManagerCycling <b>Stats</b></a>
     <nav class="nav" aria-label="Secciones">
       <a href="#inicio" data-p="inicio">Inicio</a>
+      <a href="#noticias" data-p="noticias">Noticias</a>
       <a href="#calendario" data-p="calendario">Calendario</a>
       <a href="#ranking" data-p="ranking">Ranking</a>
       <a href="#equipos" data-p="equipos">Equipos</a>
@@ -1914,6 +1936,7 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
         <section class="card"><div class="card-h"><h2 class="h2">Próximas carreras</h2><span class="muted small">según las inscripciones del foro</span></div><ul class="list">${next}</ul></section>
       </div>
       <div class="col">
+        ${(() => { const nl = buildNews(y).filter(n => n.cat !== 'prev').slice(0, 4); return nl.length ? `<section class="card"><div class="card-h"><h2 class="h2">Noticias</h2><a class="more" href="#noticias">Todas</a></div><ul class="nwl">${nl.map(n => `<li><span class="nw-tag nw-${n.cat}">${esc(n.tag)}</span> ${n.ev ? `<a href="#carrera-${n.ev.id}">${n.title}</a>` : `<a href="#noticias">${n.title}</a>`}<div class="muted small">${dshort(n.d)}</div></li>`).join('')}</ul></section>` : ''; })()}
         <section class="card"><div class="card-h"><h2 class="h2">Ranking ${y}</h2><a class="more" href="#ranking">Ver todo</a></div>
           <div class="tw"><table class="t t-compact"><thead><tr><th class="n">#</th><th>Corredor</th><th class="n" title="Victorias">Vic.</th><th class="n">Pts MC</th></tr></thead><tbody>${rk}</tbody></table></div></section>
         ${formTop.length ? `<section class="card"><h2 class="h2">En forma</h2><p class="muted small">Puntos MC en los últimos 30 días de competición</p><ul class="form">${fm}</ul></section>` : ''}
@@ -2422,6 +2445,173 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
       </div>`;
   }
 
+  // ---------- noticias (redacción automática a partir de los resultados) ----------
+  // Cada noticia se escribe sola con los datos: quién gana, por cuánto, qué supone en su temporada, en la
+  // historia de la carrera, en el ranking… El texto varía según el caso para que no suenen todas iguales.
+  const NEWS_CATS = [['all', 'Todas'], ['race', 'Carreras'], ['vuelta', 'Vueltas'], ['rank', 'Ranking'], ['rec', 'Récords'], ['prev', 'Previas']];
+  const ord = n => n + 'ª';
+  const numW = n => ['', 'una', 'dos', 'tres', 'cuatro', 'cinco', 'seis', 'siete', 'ocho', 'nueve', 'diez'][n] || String(n);
+  const hsh = s => { let h = 0; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h; };
+  const pick = (seed, arr) => arr[hsh(seed) % arr.length];
+  const addDays = (d, n) => { const x = new Date(d + 'T12:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+  const raceW = r => /GT1/.test(r.cls || '') ? 10 : /GT|1\.WT1/.test(r.cls || '') ? 8 : /WT|WC|OG/.test(r.cls || '') ? 6 : /Pro/.test(r.cls || '') ? 4 : /^NC/.test(r.cls || '') ? 2 : 3;
+  const gapTxt = v => { v = String(v || '').trim(); if (!v) return ''; if (/^s\.?\s*t\.?$/i.test(v)) return 'en el mismo tiempo'; if (/^\+/.test(v)) { const g = v.replace(/^\+\s*/, ''); return 'a ' + esc(/^\d+$/.test(g) ? g + ' s' : g); } return ''; };
+  const sur = rid => esc(rname(rid));
+
+  let NX = null;
+  function buildNews(y) {
+    if (NX && NX.ix === IX && NX.y === y) return NX.list;
+    const out = [];
+    const evs = IX.events.filter(e => e.s === y && e.race && e.race.st.length);
+    const H = history();
+    // victorias de la temporada en orden de fecha (etapas día a día, generales al final)
+    const wins = [];
+    for (const e of evs) {
+      const r = e.race;
+      r.st.forEach((s, si) => { const w = s.rows[0]; if (w && w[0] === 1 && w[1] >= 0) wins.push({ d: r.multi ? addDays(r.start, Math.min(si, 30)) : r.start, rid: w[1], tid: w[2], r, k: 'st' }); });
+      if (r.multi && r.cl.GC && r.cl.GC[0] && status(e).k !== 'live') wins.push({ d: r.end || r.start, rid: r.cl.GC[0][1], tid: r.cl.GC[0][2], r, k: 'GC' });
+    }
+    wins.sort((a, b) => a.d.localeCompare(b.d));
+    const winsUntil = (rid, d) => wins.filter(w => w.rid === rid && w.d <= d).length;
+    const teamWinsUntil = (tid, d) => wins.filter(w => w.tid === tid && w.d <= d).length;
+    // récord de victorias en una temporada anterior
+    let prevRec = { n: 0, rid: -1, y: 0 };
+    for (const [yy, st] of IX.season) if (yy < y) for (const [rid, o] of st.riders) if (o.wins > prevRec.n) prevRec = { n: o.wins, rid, y: yy };
+
+    for (const e of evs) {
+      const r = e.race, live = status(e).k === 'live';
+      const base = { d: r.end || r.start, ev: e, w: raceW(r) };
+      if (r.multi && live) {
+        const s = r.st[r.st.length - 1], sw = s.rows[0], gc = r.cl.GC || [], lead = gc[0];
+        if (!sw) continue;
+        const title = !lead ? pick(r.id + s.l, [`${sur(sw[1])} gana la ${esc(s.l.toLowerCase())} de ${esc(r.name)}`, `${esc(r.name)}: ${sur(sw[1])} se lleva la ${esc(s.l.toLowerCase())}`])
+          : lead[1] !== sw[1]
+          ? pick(r.id + s.l, [`${sur(sw[1])} gana la ${esc(s.l.toLowerCase())} de ${esc(r.name)}; ${sur(lead[1])} sigue líder`, `${esc(r.name)}: triunfo de ${sur(sw[1])} y ${sur(lead[1])} mantiene el liderato`])
+          : pick(r.id + s.l, [`${sur(sw[1])} gana y manda en ${esc(r.name)}`, `Doble alegría para ${sur(sw[1])} en ${esc(r.name)}: etapa y liderato`]);
+        let body = `${rlink(sw[1])} (${tlink(sw[2])}) se impuso en la ${esc(s.l.toLowerCase())}${s.ty ? ` (${esc((TYPE_LABEL[s.ty.split(' ')[0]] || s.ty).toLowerCase())})` : ''}${s.rows[1] ? `, por delante de ${rlink(s.rows[1][1])}${gapTxt(s.rows[1][3]) ? ' ' + gapTxt(s.rows[1][3]) : ''}` : ''}.`;
+        if (lead) body += ` En la general, ${rlink(lead[1])} ${lead[1] === sw[1] ? 'se pone o sigue de líder' : 'conserva el maillot de líder'}${gc[1] ? ` con ${rlink(gc[1][1])} como segundo${gapTxt(gc[1][3]) ? ' ' + gapTxt(gc[1][3]) : ''}` : ''}.`;
+        out.push({ ...base, d: addDays(r.start, r.st.length - 1) > (r.end || '9') ? r.end : addDays(r.start, r.st.length - 1), cat: 'vuelta', tag: 'En carrera', title, body, w: base.w + 1 });
+        continue;
+      }
+      const win = winnerOf(r); if (!win || win[1] < 0) continue;
+      const rid = win[1], tid = win[2];
+      const pod = podiumOf(r);
+      const nW = winsUntil(rid, base.d), nT = teamWinsUntil(tid, base.d);
+      const g = H.byKey.get(r.hk || raceKey(r.name, r.cls));
+      const prevEds = g ? g.eds.filter(x => x.s < y) : [];
+      const lastEd = prevEds[prevEds.length - 1];
+      const allWins = g ? (g.wins.get(rid) || []).length : 1;
+      const rec = g && g.rec[0];
+      const yng = young(rid, y);
+      let title;
+      if (r.multi) title = pick(r.id, [`${sur(rid)} conquista ${esc(r.name)}`, `${sur(rid)}, ganador de ${esc(r.name)}`, `${esc(r.name)} es para ${sur(rid)}`, `${sur(rid)} se lleva la general de ${esc(r.name)}`]);
+      else if (/\.TT$/.test(r.cls || '')) title = pick(r.id, [`${sur(rid)} vuela en ${esc(r.name)}`, `${sur(rid)} gana ${esc(r.name)} contra el crono`]);
+      else title = pick(r.id, [`${sur(rid)} gana ${esc(r.name)}`, `${sur(rid)} se impone en ${esc(r.name)}`, `Victoria de ${sur(rid)} en ${esc(r.name)}`, `${sur(rid)} levanta los brazos en ${esc(r.name)}`]);
+      if (lastEd && lastEd.w && lastEd.w[1] === rid) title = `${sur(rid)} repite triunfo en ${esc(r.name)}`;
+      const parts = [];
+      const second = pod[1], third = pod[2];
+      parts.push(`${yng ? 'El joven ' : ''}${rlink(rid)} (${tlink(tid)}) ${r.multi ? 'ganó la general de' : 'ganó'} ${evlink(e)}${second ? `, por delante de ${rlink(second[1])}${gapTxt(second[3]) ? ' ' + gapTxt(second[3]) : ''}${third ? ` y ${rlink(third[1])}` : ''}` : ''}.`);
+      if (r.multi) {
+        const sw = new Map(); r.st.forEach(s => { const w = s.rows[0]; if (w && w[0] === 1 && w[1] >= 0) sw.set(w[1], (sw.get(w[1]) || 0) + 1); });
+        const top = [...sw.entries()].sort((a, b) => b[1] - a[1])[0];
+        const jer = [['PTS', 'la regularidad'], ['KOM', 'la montaña'], ['YOU', 'los jóvenes']].map(([k, l]) => r.cl[k] && r.cl[k][0] && r.cl[k][0][1] >= 0 ? `${l} para ${rlink(r.cl[k][0][1])}` : '').filter(Boolean);
+        if (jer.length) parts.push(`Los otros maillots: ${jer.join(', ')}.`);
+        if (top && top[1] > 1) parts.push(`${rlink(top[0])} fue el más laureado con ${numW(top[1])} etapas.`);
+        const ld = r.ld ? Object.values(r.ld).filter(x => x === rid).length : 0;
+        if (ld > 1) parts.push(`${sur(rid)} vistió el maillot de líder ${ld} días.`);
+      }
+      if (nW === 1) parts.push(pick(r.id + 'a', [`Es su primera victoria de la temporada.`, `Estrena así su casillero de victorias en ${y}.`]));
+      else if (nW >= 3) parts.push(pick(r.id + 'a', [`Ya suma ${nW} victorias en ${y}.`, `Es su ${ord(nW)} victoria de la temporada.`]));
+      if (nT >= 5 && nT % 5 === 0) parts.push(`${tlink(tid)} alcanza las ${nT} victorias este año.`);
+      if (g) {
+        if (allWins > 1) parts.push(`Es su ${ord(allWins)} victoria en esta carrera${rec && rec[0] === rid && rec[1].length === allWins ? ', récord histórico de la prueba' : ''}.`);
+        else if (lastEd && lastEd.w && lastEd.w[1] !== rid) parts.push(`Toma el relevo de ${rlink(lastEd.w[1])}, ganador en ${lastEd.s}.`);
+        else if (!prevEds.length && IX.seasons.length > 1) parts.push(`Es la primera edición de la carrera en Managercycling.`);
+      }
+      out.push({ ...base, cat: r.multi ? 'vuelta' : 'race', tag: r.multi ? 'Vuelta' : /^NC/.test(r.cls || '') ? 'Campeonato' : 'Clásica', title, body: parts.join(' '), w: base.w + (nW === 1 ? 1 : 0) });
+    }
+
+    // ranking semanal (domingo a domingo)
+    const lastDate = evs.reduce((m, e) => { const d = status(e).k === 'live' ? TODAY : (e.race.end || e.race.start); return d > m ? d : m; }, '');
+    if (lastDate) {
+      const ptsAt = []; // [fecha, rid, tid, pts]
+      for (const e of evs) {
+        const r = e.race;
+        r.st.forEach((s, si) => s.rows.forEach(w => { if (w[4]) ptsAt.push([r.multi ? addDays(r.start, Math.min(si, 30)) : r.start, w[1], w[2], w[4]]); }));
+        for (const k of ['GC', 'PTS', 'KOM', 'YOU', 'LDR', 'TEAM']) (r.cl[k] || []).forEach(w => { if (w[4]) ptsAt.push([r.end || r.start, k === 'TEAM' ? -1 : w[1], w[2], w[4]]); });
+      }
+      const sunday = d => { const x = new Date(d + 'T12:00:00Z'); return addDays(d, (7 - x.getUTCDay()) % 7); };
+      let end = sunday(lastDate); if (end > TODAY) end = addDays(end, -7);
+      let prevLeader = null;
+      const weeks = [];
+      for (let k = 0, wEnd = end; k < 12; k++, wEnd = addDays(wEnd, -7)) weeks.unshift(wEnd);
+      for (const wEnd of weeks) {
+        const wStart = addDays(wEnd, -6);
+        const tot = new Map(), wk = new Map(), tw = new Map();
+        for (const [d, rid, tid, p] of ptsAt) { if (d > wEnd) continue; if (rid >= 0) tot.set(rid, (tot.get(rid) || 0) + p); if (d >= wStart) { if (rid >= 0) wk.set(rid, (wk.get(rid) || 0) + p); if (tid >= 0) tw.set(tid, (tw.get(tid) || 0) + p); } }
+        if (!wk.size) continue;
+        const rk = [...tot.entries()].sort((a, b) => b[1] - a[1]);
+        const [L, l1] = rk[0], S = rk[1];
+        const gain = [...wk.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
+        const tBest = [...tw.entries()].sort((a, b) => b[1] - a[1])[0];
+        const changed = prevLeader != null && prevLeader !== L;
+        const title = changed ? `${sur(L)} arrebata el liderato del ranking a ${sur(prevLeader)}`
+          : pick(wEnd, [`${sur(L)} sigue al frente del ranking`, `El ranking, semana a semana: ${sur(L)} manda`, `${sur(L)} mantiene el número 1`]);
+        let body = `Tras la semana del ${dshort(wStart)} al ${dshort(wEnd)}, ${rlink(L)} lidera el ranking ${y} con ${fmtN(l1)} puntos MC${S ? `, ${fmtN(l1 - S[1])} más que ${rlink(S[0])}` : ''}.`;
+        body += ` El que más sumó en la semana fue ${rlink(gain[0][0])} (${fmtN(gain[0][1])} puntos)${gain[1] ? `, seguido de ${rlink(gain[1][0])} (${fmtN(gain[1][1])})${gain[2] ? ` y ${rlink(gain[2][0])} (${fmtN(gain[2][1])})` : ''}` : ''}.`;
+        if (tBest) body += ` Equipo de la semana: ${tlink(tBest[0])}, con ${fmtN(tBest[1])} puntos.`;
+        out.push({ d: wEnd, cat: 'rank', tag: 'Ranking', title, body, w: changed ? 9 : 5 });
+        prevLeader = L;
+      }
+    }
+
+    // récords y límites de la temporada (estado actual)
+    const st = IX.season.get(y);
+    if (st && lastDate) {
+      const top = [...st.riders.entries()].sort((a, b) => b[1].wins - a[1].wins)[0];
+      if (top && prevRec.n && top[1].wins >= prevRec.n) {
+        out.push({ d: lastDate, cat: 'rec', tag: 'Récord', w: 9,
+          title: top[1].wins > prevRec.n ? `${sur(top[0])} bate el récord de victorias en una temporada` : `${sur(top[0])} iguala el récord de victorias en una temporada`,
+          body: `${rlink(top[0])} suma ${top[1].wins} victorias en ${y}. El récord anterior era de ${prevRec.n}, de ${rlink(prevRec.rid)} en ${prevRec.y}.` });
+      }
+      const full = [...st.riders.entries()].filter(([, o]) => o.days >= MAX_DAYS).map(([rid]) => rid);
+      const near = [...st.riders.entries()].filter(([, o]) => o.days < MAX_DAYS && o.days + (o.planned || 0) > MAX_DAYS).map(([rid]) => rid);
+      if (full.length || near.length) out.push({ d: lastDate, cat: 'rec', tag: 'Días', w: 4,
+        title: full.length ? `${full.length} corredor${full.length > 1 ? 'es han' : ' ha'} agotado sus ${MAX_DAYS} días de competición` : `Corredores en riesgo de pasarse del límite de días`,
+        body: `${full.length ? `Ya no pueden correr más este año: ${full.slice(0, 12).map(r => rlink(r)).join(', ')}${full.length > 12 ? ` y ${full.length - 12} más` : ''}.` : ''}${near.length ? ` Inscritos por encima del máximo: ${near.slice(0, 10).map(r => rlink(r)).join(', ')}.` : ''}` });
+    }
+
+    // previa: carreras de los próximos 7 días
+    if (y === IX.seasons[0]) {
+      const soon = IX.events.filter(e => e.s === y && e.ins && !(e.race && e.race.st.length) && e.start >= TODAY && e.start <= addDays(TODAY, 7));
+      for (const e of soon) {
+        const riders = e.ins.e.flatMap(x => x.r);
+        const fav = riders.map(rid => [rid, st && st.riders.get(rid) ? st.riders.get(rid).pts : 0]).sort((a, b) => b[1] - a[1]).slice(0, 3).filter(x => x[1] > 0);
+        const g = H.byKey.get(raceKey(e.name, e.cls)), lw = g && g.eds[g.eds.length - 1];
+        out.push({ d: TODAY, ev: e, cat: 'prev', tag: 'Previa', w: raceW({ cls: e.cls }),
+          title: pick(e.id, [`Previa: ${esc(e.name)}`, `Llega ${esc(e.name)}`, `${esc(e.name)}, a la vista`]),
+          body: `${evlink(e)} arranca ${e.start === TODAY ? 'hoy' : 'el ' + dshort(e.start)} con ${e.ins.e.length} equipos y ${riders.length} corredores inscritos.${fav.length ? ` Los favoritos por puntos esta temporada: ${fav.map(([rid]) => rlink(rid)).join(', ')}.` : ''}${lw && lw.w ? ` Último ganador: ${rlink(lw.w[1])} (${lw.s}).` : ''}` });
+      }
+    }
+    out.sort((a, b) => b.d.localeCompare(a.d) || b.w - a.w);
+    NX = { ix: IX, y, list: out };
+    return out;
+  }
+  function newsCard(n, big) {
+    return `<article class="nw${big ? ' nw-big' : ''}"><div class="nw-meta"><span class="nw-tag nw-${n.cat}">${esc(n.tag)}</span><span class="muted">${dshort(n.d)}</span>${n.ev && n.ev.cls ? clsBadge(n.ev.cls) : ''}</div><h2 class="nw-t">${n.ev ? `<a href="#carrera-${n.ev.id}">${n.title}</a>` : n.title}</h2><p class="nw-b">${n.body}</p></article>`;
+  }
+  function pageNews() {
+    setTitle('Noticias'); setNav('noticias');
+    const y = state.season, cat = state.newsCat || 'all';
+    const all = buildNews(y);
+    const list = all.filter(n => cat === 'all' || n.cat === cat);
+    const lim = state.newsLim || 30;
+    return `<header class="ph"><div class="ph-meta"><span class="eyebrow">Temporada ${y}</span></div><h1 class="h1">Noticias</h1>
+      <p class="muted">Crónicas escritas automáticamente a partir de los resultados de ${D.official && D.official[y] ? 'la web oficial' : 'Managercycling'}: cada carrera, cada vuelta, el ranking semana a semana, los récords y las previas. Se renuevan solas con cada actualización.</p></header>
+      <div class="seg seg-wide">${NEWS_CATS.map(([k, l]) => `<a href="#noticias" data-ncat="${k}" class="${cat === k ? 'on' : ''}">${l} <small>${k === 'all' ? all.length : all.filter(n => n.cat === k).length}</small></a>`).join('')}</div>
+      <div class="nws">${list.slice(0, lim).map((n, i) => newsCard(n, i === 0 && cat === 'all')).join('') || '<p class="empty">Todavía no hay noticias.</p>'}</div>
+      ${list.length > lim ? `<p class="center"><a href="#noticias" data-nmore="1" class="btn-more">Ver más noticias</a></p>` : ''}`;
+  }
   function pageAbout() {
     setTitle('Cómo funciona'); setNav('');
     const g = D.generated ? new Date(D.generated) : null;
@@ -2458,6 +2648,7 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
       case 'miticas': html = pageMiticas(); break;
       case 'historia': html = pageHistoria(arg); break;
       case 'hitos': html = pageHitos(); break;
+      case 'noticias': html = pageNews(); break;
       default: html = pageHome();
     }
     const main = $('#main');
@@ -2489,8 +2680,10 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
     if (ds.rank) state.rankMode = ds.rank;
     if (ds.scope) state.statsScope = ds.scope;
     if (ds.hcat) state.histCat = ds.hcat;
+    if (ds.ncat) { state.newsCat = ds.ncat; state.newsLim = 30; }
+    if (ds.nmore) { e.preventDefault(); state.newsLim = (state.newsLim || 30) + 30; state.scrollTop = false; route(); return; }
     const target = a.getAttribute('href');
-    if (target && target.startsWith('#') && target === location.hash && (ds.tab !== undefined || ds.season || ds.cal || ds.rank || ds.scope || ds.hcat || ds.hl !== undefined)) { e.preventDefault(); state.scrollTop = ds.tab !== undefined ? false : true; if (ds.tab !== undefined) state.scrollTop = false; route(); }
+    if (target && target.startsWith('#') && target === location.hash && (ds.tab !== undefined || ds.season || ds.cal || ds.rank || ds.scope || ds.hcat || ds.ncat || ds.hl !== undefined)) { e.preventDefault(); state.scrollTop = ds.tab !== undefined ? false : true; if (ds.tab !== undefined) state.scrollTop = false; route(); }
     else if (target && target.startsWith('#') && (ds.tab !== undefined || ds.season || ds.cal || ds.rank || ds.scope || ds.hcat)) state.scrollTop = !(ds.tab !== undefined);
   });
   document.addEventListener('change', e => {
