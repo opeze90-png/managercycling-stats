@@ -85,5 +85,40 @@
     return { season: opts.season, src: base, sourceDate, events: out, rank, meta };
   }
 
-  G.MCOfficial = { BASE, fetchSeason, jsonAfter, unescape };
+
+  // Mercado (traspasos confirmados y retirados) de la próxima temporada: tablas HTML de /mercado
+  const txt = h => String(h || '').replace(/<!-- -->/g, '').replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&#x27;|&#39;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, ' ').trim();
+  const isoDate = d => { const m = String(d).match(/(\d{2})\/(\d{2})\/(\d{4})/); return m ? `${m[3]}-${m[2]}-${m[1]}` : null; };
+  async function fetchMarket(opts) {
+    const page = await opts.get('/mercado?vista=traspasos');
+    const year = +((page.match(/Mercado\s*(?:<!-- -->)?\s*(\d{4})/) || [])[1]) || null;
+    const transfers = [];
+    let k = 0;
+    for (const blk of page.split('<tbody class="market-agreement"').slice(1)) {
+      const body = blk.split('</tbody>')[0];
+      const date = isoDate((body.match(/<span>(\d{2}\/\d{2}\/\d{4})<\/span>/) || [])[1]);
+      k++;
+      for (const tr of body.split('<tr').slice(1)) {
+        const cells = tr.split('<td').slice(1);
+        if (cells.length < 3) continue;
+        const id = (cells[0].match(/\/ciclistas\/(\d+)/) || [])[1];
+        if (!id) continue; // picks del draft
+        transfers.push([date, +id, txt('<td' + cells[0]), txt('<td' + cells[1]), txt('<td' + cells[2]), k]);
+      }
+    }
+    const retired = [];
+    try {
+      const rp = await opts.get('/mercado?vista=retirados');
+      const body = (rp.split('<tbody>')[1] || '').split('</tbody>')[0];
+      for (const tr of body.split('<tr').slice(1)) {
+        const cells = tr.split('<td').slice(1);
+        const id = (tr.match(/\/ciclistas\/(\d+)/) || [])[1];
+        if (!id || cells.length < 4) continue;
+        retired.push([isoDate(txt('<td' + cells[0])), +id, txt('<td' + cells[1]), txt('<td' + cells[2]), txt('<td' + cells[3])]);
+      }
+    } catch (e) { (opts.log || (() => {}))('Retirados: ' + e.message); }
+    return { year, transfers, retired };
+  }
+
+  G.MCOfficial = { BASE, fetchSeason, fetchMarket, jsonAfter, unescape };
 })(typeof window !== 'undefined' ? window : globalThis);

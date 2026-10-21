@@ -99,6 +99,20 @@ async function fetchOfficial(season) {
   console.log(`Web oficial ${season}: ${res.events.length} pruebas, ${res.events.reduce((a, e) => a + e.rows.length, 0)} filas, ${changed} pruebas nuevas o cambiadas.`);
 }
 
+// mercado de la próxima temporada (traspasos confirmados y retirados): raw/oficial/mercado.json
+const marketFile = path.join(RAW, 'oficial', 'mercado.json');
+async function fetchMarket() {
+  const get = async u => { const r = await fetch(OFFICIAL + u, { headers: { 'user-agent': 'managercycling-stats' }, signal: AbortSignal.timeout(60000) }); if (!r.ok) throw new Error(u + ' ' + r.status); return r.text(); };
+  const m = await MCOfficial.fetchMarket({ get, log: x => console.log('  ' + x) });
+  if (!m.year) throw new Error('formato inesperado');
+  const old = fs.existsSync(marketFile) ? JSON.parse(fs.readFileSync(marketFile, 'utf8')) : null;
+  if (old && JSON.stringify({ ...old, at: null }) === JSON.stringify({ ...m, at: null })) { console.log(`Mercado ${m.year}: sin cambios.`); return; }
+  m.at = new Date().toISOString();
+  fs.mkdirSync(path.dirname(marketFile), { recursive: true });
+  fs.writeFileSync(marketFile, JSON.stringify(m));
+  console.log(`Mercado ${m.year}: ${m.transfers.length} traspasos de corredores, ${m.retired.length} retirados.`);
+}
+
 // comprobación: los totales que calcula la web deben ser los de las clasificaciones oficiales
 function checkOfficial(data, off) {
   if (!off.rank) return;
@@ -121,7 +135,7 @@ function inputsHash() {
   const add = f => { if (fs.existsSync(f)) { h.update(f); h.update(fs.readFileSync(f)); } };
   add(path.join(RAW, 'index.json'));
   const od = path.join(RAW, 'oficial');
-  if (fs.existsSync(od)) for (const y of fs.readdirSync(od).sort()) add(path.join(od, y, 'index.json'));
+  if (fs.existsSync(od)) for (const y of fs.readdirSync(od).sort()) add(/\.json$/.test(y) ? path.join(od, y) : path.join(od, y, 'index.json'));
   for (const f of fs.readdirSync(here).sort()) if (/\.(js|json)$/.test(f)) add(path.join(here, f));
   return h.digest('hex').slice(0, 16);
 }
@@ -151,7 +165,8 @@ function rebuild() {
     if (offInfo[s]) part.official = offInfo[s];
     fs.writeFileSync(path.join(DATA, `s${s}.json`), JSON.stringify(part));
   }
-  const core = { v: data.v, generated: data.generated, inputs: inputsHash(), seasons: data.seasons, teams: data.teams, riders: data.riders, oid: data.oid, offSeasons: data.offSeasons };
+  const market = fs.existsSync(marketFile) ? JSON.parse(fs.readFileSync(marketFile, 'utf8')) : undefined;
+  const core = { v: data.v, generated: data.generated, inputs: inputsHash(), market, seasons: data.seasons, teams: data.teams, riders: data.riders, oid: data.oid, offSeasons: data.offSeasons };
   fs.writeFileSync(path.join(DATA, 'core.json'), JSON.stringify(core));
   console.log(`Datos reconstruidos desde ${n} temas: ${data.races.length} carreras, ${data.ins.length} inscripciones, ${data.riders.length} corredores.`);
 }
@@ -205,6 +220,7 @@ function rebuild() {
     for (const y of [...new Set([cfg.current.year, ...(cfg.seasons || []).map(s => s.year)])].filter(y => y >= OFFICIAL_FROM)) {
       try { await fetchOfficial(y); } catch (e) { console.log(`No se pudo leer la web oficial (${y}): ${e.message}. Se mantiene la última copia guardada.`); }
     }
+    try { await fetchMarket(); } catch (e) { console.log('No se pudo leer el mercado de la web oficial: ' + e.message); }
     const oldOff = path.join(RAW, `oficial-${cfg.current.year}.json`); if (fs.existsSync(oldOff)) fs.unlinkSync(oldOff);
   }
   // Topics saved before pictures were read: download them again, newest first, while time remains.
