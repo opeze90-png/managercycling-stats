@@ -333,6 +333,7 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
 .nw-race .nw-tag, .nw-tag.nw-race { background: var(--bar); color: var(--gc); border-color: var(--bar); }
 .nw-tag.nw-vuelta { background: var(--gc); color: #15120a; border-color: var(--gc); }
 .nw-tag.nw-rank { background: var(--pts); color: #08210f; border-color: var(--pts); }
+.nw-tag.nw-merc { background: var(--accent); color: #fff; border-color: var(--accent); }
 .nw-tag.nw-rec { background: var(--kom); color: #fff; border-color: var(--kom); }
 .nwl { list-style: none; margin: 0; padding: 0; }
 .nwl li { padding: 8px 0; border-bottom: 1px solid var(--line); line-height: 1.3; }
@@ -340,6 +341,19 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
 .nwl a { color: var(--ink); font-weight: 600; }
 .center { text-align: center; }
 .btn-more { display: inline-block; margin-top: 14px; padding: 8px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+
+/* Mercado */
+.up { color: var(--good); font-weight: 600; }
+.down { color: var(--kom); font-weight: 600; }
+.g-2 { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); }
+@media (max-width: 900px) { .g-2 { grid-template-columns: 1fr; } }
+.mk-d summary { cursor: pointer; margin-top: 2px; }
+.mk-l { list-style: none; margin: 4px 0 8px; padding: 0; }
+.mk-l li { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; border-bottom: 1px dashed var(--line); font-size: 14px; }
+.mk-l li .n { margin-left: auto; white-space: nowrap; }
+.mk-deals { list-style: none; margin: 0; padding: 0; }
+.mk-deals > li { padding: 10px 0; border-bottom: 1px solid var(--line); }
+.mk-h { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
 </style>
 
 <header class="bar">
@@ -351,6 +365,7 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
       <a href="#calendario" data-p="calendario">Calendario</a>
       <a href="#ranking" data-p="ranking">Ranking</a>
       <a href="#equipos" data-p="equipos">Equipos</a>
+      <a href="#mercado" data-p="mercado">Mercado</a>
       <a href="#stats" data-p="stats">Stats</a>
       <a href="#miticas" data-p="miticas">Míticas</a>
       <a href="#hitos" data-p="hitos">Hitos</a>
@@ -2139,18 +2154,21 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
     const st = IX.season.get(y);
     const mode = state.rankMode || 'pts';
     const onlyJ = !!state.rankJ;
-    const list = st ? [...st.riders.entries()].filter(([rid]) => !onlyJ || young(rid)) : [];
-    const keyf = { pts: o => o.pts, wins: o => o.wins * 1e6 + o.pod * 1e3 + o.top10, gc: o => o.gc * 1e6 + o.wins, lead: o => o.lead, days: o => o.days, pod: o => o.pod * 1e3 + o.wins }[mode];
+    const perDay = mode === 'pd' || mode === 'p85';
+    const list = st ? [...st.riders.entries()].filter(([rid, o]) => (!onlyJ || young(rid)) && (!perDay || o.days >= MIN_PD)) : [];
+    const keyf = { pd: pdOf, p85: p85Of, pts: o => o.pts, wins: o => o.wins * 1e6 + o.pod * 1e3 + o.top10, gc: o => o.gc * 1e6 + o.wins, lead: o => o.lead, days: o => o.days, pod: o => o.pod * 1e3 + o.wins }[mode];
     list.sort((a, b) => keyf(b[1]) - keyf(a[1]) || b[1].pts - a[1].pts);
     const top = list.filter(([, o]) => keyf(o) > 0).slice(0, 300);
-    const modes = [['pts', 'Puntos'], ['wins', 'Victorias'], ['gc', 'Generales'], ['pod', 'Podios'], ['lead', 'Días de líder'], ['days', 'Días de carrera']];
-    const modesNote = '';
+    const modes = [['pts', 'Puntos'], ['wins', 'Victorias'], ['gc', 'Generales'], ['pod', 'Podios'], ['lead', 'Días de líder'], ['days', 'Días de carrera'], ['pd', 'Pts/día'], ['p85', `A ${MAX_DAYS} días`]];
+    const modesNote = perDay ? `<p class="muted small">Puntos por día de competición y lo que sumaría cada corredor si corriera los ${MAX_DAYS} días a ese ritmo (si ya los ha corrido, sus puntos reales). Solo corredores con ${MIN_PD} días o más.</p>` : '';
     return `<header class="ph"><div class="ph-meta"><span class="eyebrow">Temporada ${y}</span></div><h1 class="h1">Ranking de corredores</h1><p class="muted">Puntos MC sumados en etapas, clásicas y clasificaciones finales. Días: corridos de ${MAX_DAYS} posibles, y en pequeño los ya inscritos.${D.official && D.official[y] ? ` <span class="off-badge" title="Resultados, puntos y días sacados de la web oficial de Managercycling">✓ Datos de la web oficial (${new Date(D.official[y].at).toLocaleDateString('es-ES')})</span>` : ''}</p></header>
       <div class="toolbar"><div class="seg">${modes.map(([k, l]) => `<a href="#ranking" data-rank="${k}" class="${mode === k ? 'on' : ''}">${l}</a>`).join('')}</div>
       <label class="chk"><input type="checkbox" id="onlyJ" ${onlyJ ? 'checked' : ''}> Solo jóvenes (J)</label>
       <div class="filter"><input id="tfilter" type="search" placeholder="Buscar en la tabla" aria-label="Filtrar el ranking"></div></div>
-      <section class="card"><div class="tw"><table class="t t-rank" data-filter><thead><tr><th class="n">#</th><th>Corredor</th><th>Equipo</th><th class="n" title="Días corridos (+ inscritos) de ${MAX_DAYS}">Días</th><th class="n">Vic.</th><th class="n">Gen.</th><th class="n">Pod.</th><th class="n">Top 10</th><th class="n">Líder</th><th class="n">Pts MC</th></tr></thead>
-      <tbody>${top.map(([rid, o], i) => `<tr><td class="n">${i + 1}</td><td class="rider">${rlink(rid)}</td><td class="team">${tlink(o.lastT)}</td><td class="n">${daysCell(o)}</td><td class="n">${o.wins || ''}</td><td class="n">${o.gc || ''}</td><td class="n">${o.pod || ''}</td><td class="n">${o.top10 || ''}</td><td class="n">${o.lead || ''}</td><td class="n strong">${fmtN(o.pts)}</td></tr>`).join('')}</tbody></table></div></section>`;
+      ${modesNote}
+      ${perDay ? `<section class="card"><div class="tw"><table class="t t-rank" data-filter><thead><tr><th class="n">#</th><th>Corredor</th><th>Equipo</th><th class="n">Días</th><th class="n">Pts MC</th><th class="n">Pts/día</th><th class="n">A ${MAX_DAYS} días</th><th class="n" title="Diferencia con sus puntos reales">Margen</th></tr></thead>
+      <tbody>${top.map(([rid, o], i) => `<tr><td class="n">${i + 1}</td><td class="rider">${rlink(rid)}</td><td class="team">${tlink(o.lastT)}</td><td class="n">${daysCell(o)}</td><td class="n">${fmtN(o.pts)}</td><td class="n ${mode === 'pd' ? 'strong' : ''}">${fmtN(pdOf(o))}</td><td class="n ${mode === 'p85' ? 'strong' : ''}">${fmtN(p85Of(o))}</td><td class="n muted">${p85Of(o) - o.pts > 0.5 ? '+' + fmtN(p85Of(o) - o.pts) : ''}</td></tr>`).join('')}</tbody></table></div></section>` : `<section class="card"><div class="tw"><table class="t t-rank" data-filter><thead><tr><th class="n">#</th><th>Corredor</th><th>Equipo</th><th class="n" title="Días corridos (+ inscritos) de ${MAX_DAYS}">Días</th><th class="n">Vic.</th><th class="n">Gen.</th><th class="n">Pod.</th><th class="n">Top 10</th><th class="n">Líder</th><th class="n">Pts MC</th></tr></thead>
+      <tbody>${top.map(([rid, o], i) => `<tr><td class="n">${i + 1}</td><td class="rider">${rlink(rid)}</td><td class="team">${tlink(o.lastT)}</td><td class="n">${daysCell(o)}</td><td class="n">${o.wins || ''}</td><td class="n">${o.gc || ''}</td><td class="n">${o.pod || ''}</td><td class="n">${o.top10 || ''}</td><td class="n">${o.lead || ''}</td><td class="n strong">${fmtN(o.pts)}</td></tr>`).join('')}</tbody></table></div></section>`}`;
   }
 
   // ----- teams -----
@@ -2158,8 +2176,16 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
     setTitle('Equipos'); setNav('equipos');
     const y = state.season, st = IX.season.get(y);
     const list = st ? [...st.teams.entries()].filter(([t, o]) => t >= 0 && o.riders.size >= 3) : [];
+    const tm = state.teamMode || 'pts';
     list.sort((a, b) => (b[1].pts || b[1].rpts) - (a[1].pts || a[1].rpts));
-    return `<header class="ph"><div class="ph-meta"><span class="eyebrow">Temporada ${y}</span></div><h1 class="h1">Equipos</h1><p class="muted">Puntos MC de equipo: los puntos de todos sus corredores más los de la clasificación por equipos de cada carrera, como en la clasificación oficial.</p></header>
+    const seg = `<div class="seg seg-wide"><a href="#equipos" data-tmode="pts" class="${tm === 'pts' ? 'on' : ''}">Puntos</a><a href="#equipos" data-tmode="pd" class="${tm === 'pd' ? 'on' : ''}">Pts/día</a><a href="#equipos" data-tmode="p85" class="${tm === 'p85' ? 'on' : ''}">A ${MAX_DAYS} días</a><a href="#mercado">Con los traspasos ${D.market ? D.market.year : ''}</a></div>`;
+    if (tm !== 'pts') {
+      const L = list.map(([tid]) => [tid, teamPD(st, tid)]).filter(([, o]) => o && o.days > 0).sort((a, b) => tm === 'pd' ? b[1].pd - a[1].pd : b[1].proj - a[1].proj);
+      return `<header class="ph"><div class="ph-meta"><span class="eyebrow">Temporada ${y}</span></div><h1 class="h1">Equipos</h1><p class="muted">Puntos por día: puntos de sus corredores entre los días que han corrido. A ${MAX_DAYS} días: lo que habría sumado el equipo si cada corredor hubiera corrido los ${MAX_DAYS} días a su ritmo (los que ya los han corrido cuentan con sus puntos reales), más su clasificación por equipos en la misma proporción.</p></header>${seg}
+      <section class="card"><div class="tw"><table class="t t-rank"><thead><tr><th class="n">#</th><th>Equipo</th><th class="n">Corredores</th><th class="n" title="Días corridos por todos sus corredores, y porcentaje de los posibles">Días</th><th class="n">Pts MC</th><th class="n">Pts/día</th><th class="n">A ${MAX_DAYS} días</th><th class="n">Puesto real</th></tr></thead><tbody>
+      ${L.map(([tid, o], i) => { const real = list.findIndex(x => x[0] === tid) + 1; return `<tr><td class="n">${i + 1}</td><td>${tlink(tid, 'strongish')}</td><td class="n">${o.n}</td><td class="n">${o.days} <span class="muted small">${Math.round(o.used * 100)}%</span></td><td class="n">${fmtN(o.tot)}</td><td class="n ${tm === 'pd' ? 'strong' : ''}">${fmtN(o.pd)}</td><td class="n ${tm === 'p85' ? 'strong' : ''}">${fmtN(o.proj)}</td><td class="n">${real}º ${real > i + 1 ? `<span class="up">▲${real - i - 1}</span>` : real < i + 1 ? `<span class="down">▼${i + 1 - real}</span>` : ''}</td></tr>`; }).join('')}</tbody></table></div></section>`;
+    }
+    return `<header class="ph"><div class="ph-meta"><span class="eyebrow">Temporada ${y}</span></div><h1 class="h1">Equipos</h1><p class="muted">Puntos MC de equipo: los puntos de todos sus corredores más los de la clasificación por equipos de cada carrera, como en la clasificación oficial.</p></header>${seg}
       <section class="card"><div class="tw"><table class="t t-rank"><thead><tr><th class="n">#</th><th>Equipo</th><th>Mánager</th><th class="n">Corredores</th><th class="n">Victorias</th><th class="n">Pts MC equipo</th></tr></thead><tbody>
       ${list.map(([tid, o], i) => `<tr><td class="n">${i + 1}</td><td>${tlink(tid, 'strongish')}</td><td class="muted">${esc(st.teamMgr.get(tid)?.m || '')}</td><td class="n">${o.riders.size}</td><td class="n">${o.wins || ''}</td><td class="n strong">${fmtN(o.pts || o.rpts)}</td></tr>`).join('')}</tbody></table></div></section>`;
   }
@@ -2445,10 +2471,81 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
       </div>`;
   }
 
+  // ---------- puntos por día y proyección a 85 días ----------
+  const MIN_PD = 10; // días mínimos para entrar en la clasificación de puntos por día
+  const pdOf = o => o && o.days > 0 ? o.pts / o.days : 0;
+  const p85Of = o => o && o.days > 0 ? (o.days >= MAX_DAYS ? o.pts : pdOf(o) * MAX_DAYS) : 0;
+  // equipo: puntos por día de sus corredores y lo que habría sumado con todos ellos a 85 días
+  function teamPD(st, tid) {
+    const t = st.teams.get(tid); if (!t) return null;
+    let days = 0, rp = 0, proj = 0, n = 0;
+    for (const [rid, o] of st.riders) if (o.lastT === tid) { n++; days += o.days; rp += o.pts; proj += p85Of(o); }
+    const tot = t.pts || t.rpts, extra = Math.max(0, tot - rp); // clasificación por equipos
+    return { n, days, pd: days ? rp / days : 0, proj: proj + (rp > 0 ? extra * proj / rp : 0), tot, used: n ? days / (n * MAX_DAYS) : 0 };
+  }
+
+  // ---------- mercado: traspasos confirmados y cómo habría quedado la temporada ----------
+  function marketSim(y, base) {
+    const M = D.market, st = IX.season.get(y);
+    if (!M || !st) return null;
+    const ridOfOid = new Map(Object.entries(D.oid || {}).map(([r, o]) => [o, +r]));
+    const tidOf = name => { const k = MC.teamKey(name || ''); const i = D.teams.findIndex(t => MC.teamKey(t) === k); return i >= 0 ? i : 'n:' + name; };
+    const val = rid => { const o = rid != null ? st.riders.get(rid) : null; return o ? (base === 'p85' ? p85Of(o) : o.pts) : 0; };
+    // destino final de cada corredor (hay quien cambia dos veces)
+    const tr = M.transfers.slice().sort((a, b) => a[0].localeCompare(b[0]) || b[5] - a[5]);
+    const mv = new Map();
+    for (const [d, oid, name, from, to] of tr) { const m = mv.get(oid) || { oid, name, from: tidOf(from), fromName: from, path: [] }; m.to = tidOf(to); m.toName = to; m.path.push(to); m.d = d; mv.set(oid, m); }
+    const ret = new Map(M.retired.map(([d, oid, name, team, est]) => [oid, { oid, name, team: tidOf(team), teamName: team, est, d }]));
+    const T = new Map();
+    const TT = (tid, name) => { if (!T.has(tid)) { const o = typeof tid === 'number' ? (base === 'p85' ? (teamPD(st, tid) || {}).proj : (st.teams.get(tid) || {}).pts) : 0; T.set(tid, { tid, name: name || (typeof tid === 'number' ? tname(tid) : String(tid).slice(2)), base: o || 0, ins: [], outs: [], ret: [] }); } return T.get(tid); };
+    for (const [tid, o] of st.teams) if (tid >= 0 && o.riders.size >= 3) TT(tid);
+    for (const m of mv.values()) {
+      const rid = ridOfOid.get(m.oid), v = val(rid), cur = rid != null && st.riders.get(rid) ? st.riders.get(rid).lastT : m.from;
+      const fromT = cur >= 0 ? cur : m.from;
+      if (fromT === m.to) continue;
+      TT(fromT, m.fromName).outs.push({ ...m, rid, v });
+      TT(m.to, m.toName).ins.push({ ...m, rid, v });
+    }
+    for (const r of ret.values()) {
+      if (mv.has(r.oid)) continue;
+      const rid = ridOfOid.get(r.oid), v = val(rid), cur = rid != null && st.riders.get(rid) ? st.riders.get(rid).lastT : r.team;
+      TT(cur >= 0 ? cur : r.team, r.teamName).ret.push({ ...r, rid, v });
+    }
+    const list = [...T.values()];
+    for (const t of list) { t.gin = t.ins.reduce((a, x) => a + x.v, 0); t.gout = t.outs.reduce((a, x) => a + x.v, 0); t.gret = t.ret.reduce((a, x) => a + x.v, 0); t.sim = t.base + t.gin - t.gout - t.gret; }
+    list.sort((a, b) => b.base - a.base).forEach((t, i) => t.r0 = i + 1);
+    list.sort((a, b) => b.sim - a.sim).forEach((t, i) => t.r1 = i + 1);
+    return { M, list, moves: mv, ret };
+  }
+  function pageMarket() {
+    setTitle('Mercado'); setNav('mercado');
+    const y = IX.seasons[0], base = state.mktBase || 'pts';
+    const S = marketSim(y, base);
+    if (!S) return `<header class="ph"><h1 class="h1">Mercado</h1><p class="muted">Todavía no hay datos del mercado de la web oficial.</p></header>`;
+    const { M, list } = S;
+    const who = x => x.rid != null ? rlink(x.rid) : esc(x.name);
+    const mvList = (arr, sign) => arr.sort((a, b) => b.v - a.v).map(x => `<li>${who(x)} <span class="muted small">${sign === '+' ? 'desde ' + esc(x.fromName) : sign === '−' ? 'a ' + esc(x.toName) : esc(x.est || 'retirado').toLowerCase()}</span><span class="n ${sign === '+' ? 'up' : 'down'}">${x.v ? (sign === '+' ? '+' : '−') + fmtN(x.v) : '0'}</span></li>`).join('');
+    const arrow = t => { const d = t.r0 - t.r1; return d > 0 ? `<span class="up">▲${d}</span>` : d < 0 ? `<span class="down">▼${-d}</span>` : '<span class="muted">=</span>'; };
+    const rows = list.map(t => `<tr><td class="n">${t.r1}</td><td>${typeof t.tid === 'number' ? tlink(t.tid, 'strongish') : esc(t.name)}<details class="mk-d"><summary class="small muted">${t.ins.length} alta${t.ins.length === 1 ? '' : 's'} · ${t.outs.length} baja${t.outs.length === 1 ? '' : 's'}${t.ret.length ? ` · ${t.ret.length} retirado${t.ret.length > 1 ? 's' : ''}` : ''}</summary>
+      ${t.ins.length ? `<p class="small strong">Altas</p><ul class="mk-l">${mvList(t.ins, '+')}</ul>` : ''}${t.outs.length ? `<p class="small strong">Bajas</p><ul class="mk-l">${mvList(t.outs, '−')}</ul>` : ''}${t.ret.length ? `<p class="small strong">Retirados</p><ul class="mk-l">${mvList(t.ret, '×')}</ul>` : ''}</details></td>
+      <td class="n">${fmtN(t.base)} <span class="muted small">(${t.r0}º)</span></td><td class="n up">${t.gin ? '+' + fmtN(t.gin) : ''}</td><td class="n down">${t.gout + t.gret ? '−' + fmtN(t.gout + t.gret) : ''}</td><td class="n strong">${fmtN(t.sim)}</td><td class="n">${arrow(t)}</td></tr>`).join('');
+    // acuerdos (como en la web oficial)
+    const groups = new Map(); for (const x of M.transfers) { if (!groups.has(x[5])) groups.set(x[5], []); groups.get(x[5]).push(x); }
+    const ridOfOid = new Map(Object.entries(D.oid || {}).map(([r, o]) => [o, +r]));
+    const st = IX.season.get(y);
+    const deals = [...groups.values()].map(g => { const teams = [...new Set(g.flatMap(x => [x[3], x[4]]))]; return `<li><div class="mk-h"><span class="li-date">${dshort(g[0][0])}</span><strong>${teams.map(esc).join(' ⇄ ')}</strong></div><ul class="mk-l">${g.map(x => { const rid = ridOfOid.get(x[1]), o = rid != null && st ? st.riders.get(rid) : null; return `<li>${rid != null ? rlink(rid) : esc(x[2])} <span class="muted small">${esc(x[3])} → ${esc(x[4])}</span><span class="n">${o ? `${fmtN(o.pts)} pts · ${o.days} d` : '—'}</span></li>`; }).join('')}</ul></li>`; }).join('');
+    return `<header class="ph"><div class="ph-meta"><span class="eyebrow">Mercado ${M.year} · web oficial</span></div><h1 class="h1">Mercado</h1>
+      <p class="muted">Traspasos confirmados y retirados del mercado ${M.year} (actualizados el ${new Date(M.at).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' })}). La tabla recalcula la clasificación por equipos de ${y} como si cada corredor hubiera corrido toda la temporada en su equipo de ${M.year}: sus puntos de ${y} pasan al equipo nuevo y los retirados se descuentan. La clasificación por equipos de cada carrera se queda en el equipo que la ganó.</p></header>
+      <div class="seg seg-wide"><a href="#mercado" data-mkt="pts" class="${base === 'pts' ? 'on' : ''}">Con los puntos reales de ${y}</a><a href="#mercado" data-mkt="p85" class="${base === 'p85' ? 'on' : ''}">Con la proyección a ${MAX_DAYS} días</a></div>
+      <div class="grid g-2">
+        <section class="card"><h2 class="h2">¿Cómo habría quedado ${y}?</h2><div class="tw"><table class="t t-rank"><thead><tr><th class="n">#</th><th>Equipo (plantilla ${M.year})</th><th class="n">${base === 'p85' ? 'Proyección' : 'Pts'} ${y}</th><th class="n">Altas</th><th class="n">Bajas</th><th class="n">Con los cambios</th><th class="n">Puesto</th></tr></thead><tbody>${rows}</tbody></table></div></section>
+        <section class="card"><h2 class="h2">Traspasos confirmados</h2><p class="muted small">${M.transfers.length} corredores en ${groups.size} acuerdos · puntos y días de ${y}</p><ul class="mk-deals">${deals}</ul></section>
+      </div>`;
+  }
   // ---------- noticias (redacción automática a partir de los resultados) ----------
   // Cada noticia se escribe sola con los datos: quién gana, por cuánto, qué supone en su temporada, en la
   // historia de la carrera, en el ranking… El texto varía según el caso para que no suenen todas iguales.
-  const NEWS_CATS = [['all', 'Todas'], ['race', 'Carreras'], ['vuelta', 'Vueltas'], ['rank', 'Ranking'], ['rec', 'Récords'], ['prev', 'Previas']];
+  const NEWS_CATS = [['all', 'Todas'], ['race', 'Carreras'], ['vuelta', 'Vueltas'], ['rank', 'Ranking'], ['rec', 'Récords'], ['merc', 'Mercado'], ['prev', 'Previas']];
   const ord = n => n + 'ª';
   const numW = n => ['', 'una', 'dos', 'tres', 'cuatro', 'cinco', 'seis', 'siete', 'ocho', 'nueve', 'diez'][n] || String(n);
   const hsh = s => { let h = 0; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h; };
@@ -2593,6 +2690,19 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
           body: `${evlink(e)} arranca ${e.start === TODAY ? 'hoy' : 'el ' + dshort(e.start)} con ${e.ins.e.length} equipos y ${riders.length} corredores inscritos.${fav.length ? ` Los favoritos por puntos esta temporada: ${fav.map(([rid]) => rlink(rid)).join(', ')}.` : ''}${lw && lw.w ? ` Último ganador: ${rlink(lw.w[1])} (${lw.s}).` : ''}` });
       }
     }
+    // mercado: cada acuerdo confirmado
+    if (D.market && y === IX.seasons[0] && st) {
+      const ridOfOid = new Map(Object.entries(D.oid || {}).map(([r, o]) => [o, +r]));
+      const groups = new Map(); for (const x of D.market.transfers) { if (!groups.has(x[5])) groups.set(x[5], []); groups.get(x[5]).push(x); }
+      for (const g of groups.values()) {
+        const items = g.map(x => { const rid = ridOfOid.get(x[1]); const o = rid != null ? st.riders.get(rid) : null; return { x, rid, pts: o ? o.pts : 0 }; }).sort((a, b) => b.pts - a.pts);
+        const star = items[0], teams = [...new Set(g.flatMap(x => [x[3], x[4]]))];
+        const nm = it => it.rid != null ? rlink(it.rid) : esc(it.x[2]);
+        out.push({ d: g[0][0], cat: 'merc', tag: 'Mercado', w: 5,
+          title: items.length === 1 ? `${esc(star.x[2].replace(/\s*\(J\)/, ''))} ficha por ${esc(star.x[4])}` : `${esc(star.x[2].replace(/\s*\(J\)/, ''))}${items.length > 1 ? ` y ${items.length - 1} más` : ''}: acuerdo entre ${teams.map(esc).join(' y ')}`,
+          body: `Traspaso confirmado para ${D.market.year}: ${items.map(it => `${nm(it)} (${esc(it.x[3])} → ${esc(it.x[4])}${it.pts ? `, ${fmtN(it.pts)} pts en ${y}` : ''})`).join('; ')}. <a href="#mercado">Cómo habría quedado ${y} con los cambios</a>.` });
+      }
+    }
     out.sort((a, b) => b.d.localeCompare(a.d) || b.w - a.w);
     NX = { ix: IX, y, list: out };
     return out;
@@ -2649,6 +2759,7 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
       case 'historia': html = pageHistoria(arg); break;
       case 'hitos': html = pageHitos(); break;
       case 'noticias': html = pageNews(); break;
+      case 'mercado': html = pageMarket(); break;
       default: html = pageHome();
     }
     const main = $('#main');
@@ -2681,9 +2792,11 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
     if (ds.scope) state.statsScope = ds.scope;
     if (ds.hcat) state.histCat = ds.hcat;
     if (ds.ncat) { state.newsCat = ds.ncat; state.newsLim = 30; }
+    if (ds.tmode) state.teamMode = ds.tmode;
+    if (ds.mkt) state.mktBase = ds.mkt;
     if (ds.nmore) { e.preventDefault(); state.newsLim = (state.newsLim || 30) + 30; state.scrollTop = false; route(); return; }
     const target = a.getAttribute('href');
-    if (target && target.startsWith('#') && target === location.hash && (ds.tab !== undefined || ds.season || ds.cal || ds.rank || ds.scope || ds.hcat || ds.ncat || ds.hl !== undefined)) { e.preventDefault(); state.scrollTop = ds.tab !== undefined ? false : true; if (ds.tab !== undefined) state.scrollTop = false; route(); }
+    if (target && target.startsWith('#') && target === location.hash && (ds.tab !== undefined || ds.season || ds.cal || ds.rank || ds.scope || ds.hcat || ds.ncat || ds.tmode || ds.mkt || ds.hl !== undefined)) { e.preventDefault(); state.scrollTop = ds.tab !== undefined ? false : true; if (ds.tab !== undefined) state.scrollTop = false; route(); }
     else if (target && target.startsWith('#') && (ds.tab !== undefined || ds.season || ds.cal || ds.rank || ds.scope || ds.hcat)) state.scrollTop = !(ds.tab !== undefined);
   });
   document.addEventListener('change', e => {
