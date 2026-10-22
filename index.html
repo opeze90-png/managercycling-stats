@@ -360,6 +360,11 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
 .pq b { font-family: var(--f-display); font-size: 22px; color: var(--ink); }
 .pq small { color: var(--muted); margin-right: 8px; }
 .pq span { color: var(--muted); margin-right: 6px; }
+
+/* Categoría del equipo */
+.dv { display: inline-block; margin-left: 5px; font-size: 10px; font-weight: 700; letter-spacing: .04em; padding: 0 4px; border-radius: 3px; vertical-align: 1px; line-height: 15px; }
+.dv-wt { background: var(--bar); color: var(--gc); }
+.dv-cp { background: var(--surface-2); color: var(--muted); border: 1px solid var(--line); }
 </style>
 
 <header class="bar">
@@ -1837,7 +1842,10 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
   const rname = rid => rid >= 0 && D.riders[rid] ? D.riders[rid][0] : '—';
   const tname = tid => tid >= 0 && D.teams[tid] ? D.teams[tid] : '';
   const rlink = (rid, cls = '') => rid < 0 ? '<span class="muted">—</span>' : `<a class="rl ${cls}" href="#corredor-${IX.riderSlug[rid]}">${esc(rname(rid))}</a>${young(rid) ? '<span class="jb" title="Clasificación de jóvenes (J)">J</span>' : ''}`;
-  const tlink = (tid, cls = '') => tid < 0 ? '' : `<a class="tl ${cls}" href="#equipo-${IX.teamSlug[tid]}">${esc(tname(tid))}</a>`;
+  // categoría del equipo (WT o CP) en las temporadas que vienen de la web oficial
+  const divOf = name => { if (!D.div || !(D.offSeasons || []).includes(state.season)) return ''; const d = D.div[name]; if (d) return d; const k = MC.teamKey(name || ''); for (const n in D.div) if (MC.teamKey(n) === k) return D.div[n]; return ''; };
+  const divBadge = name => { const d = divOf(name); return d ? `<span class="dv dv-${d.toLowerCase()}" title="${d === 'WT' ? 'WorldTour' : 'Continental Profesional'}">${esc(d)}</span>` : ''; };
+  const tlink = (tid, cls = '') => tid < 0 ? '' : `<a class="tl ${cls}" href="#equipo-${IX.teamSlug[tid]}">${esc(tname(tid))}</a>${divBadge(tname(tid))}`;
   const evlink = ev => `<a class="el" href="#carrera-${ev.id}">${esc(ev.name)}</a>`;
   function clsTier(cls) {
     if (!cls) return 'x';
@@ -2540,7 +2548,7 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
     const groups = new Map(); for (const x of M.transfers) { if (!groups.has(x[5])) groups.set(x[5], []); groups.get(x[5]).push(x); }
     const ridOfOid = new Map(Object.entries(D.oid || {}).map(([r, o]) => [o, +r]));
     const st = IX.season.get(y);
-    const deals = [...groups.values()].map(g => { const teams = [...new Set(g.flatMap(x => [x[3], x[4]]))]; return `<li><div class="mk-h"><span class="li-date">${dshort(g[0][0])}</span><strong>${teams.map(esc).join(' ⇄ ')}</strong></div><ul class="mk-l">${g.map(x => { const rid = ridOfOid.get(x[1]), o = rid != null && st ? st.riders.get(rid) : null; return `<li>${rid != null ? rlink(rid) : esc(x[2])} <span class="muted small">${esc(x[3])} → ${esc(x[4])}</span><span class="n">${o ? `${fmtN(o.pts)} pts · ${o.days} d` : '—'}</span></li>`; }).join('')}</ul></li>`; }).join('');
+    const deals = [...groups.values()].map(g => { const teams = [...new Set(g.flatMap(x => [x[3], x[4]]))]; return `<li><div class="mk-h"><span class="li-date">${dshort(g[0][0])}</span><strong>${teams.map(n => esc(n) + divBadge(n)).join(' ⇄ ')}</strong></div><ul class="mk-l">${g.map(x => { const rid = ridOfOid.get(x[1]), o = rid != null && st ? st.riders.get(rid) : null; return `<li>${rid != null ? rlink(rid) : esc(x[2])} <span class="muted small">${esc(x[3])} → ${esc(x[4])}</span><span class="n">${o ? `${fmtN(o.pts)} pts · ${o.days} d` : '—'}</span></li>`; }).join('')}</ul></li>`; }).join('');
     return `<header class="ph"><div class="ph-meta"><span class="eyebrow">Mercado ${M.year} · web oficial</span></div><h1 class="h1">Mercado</h1>
       <p class="muted">Traspasos confirmados y retirados del mercado ${M.year} (actualizados el ${new Date(M.at).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' })}). La tabla recalcula la clasificación por equipos de ${y} como si cada corredor hubiera corrido toda la temporada en su equipo de ${M.year}: sus puntos de ${y} pasan al equipo nuevo y los retirados se descuentan. La clasificación por equipos de cada carrera se queda en el equipo que la ganó.</p></header>
       <div class="seg seg-wide"><a href="#mercado" data-mkt="pts" class="${base === 'pts' ? 'on' : ''}">Con los puntos reales de ${y}</a><a href="#mercado" data-mkt="p85" class="${base === 'p85' ? 'on' : ''}">Con la proyección a ${MAX_DAYS} días</a></div>
@@ -2584,7 +2592,7 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
     const lim = 300;
     const rows = list.slice(0, lim).map((r, i) => {
       const dm = r[4] != null ? r[3] - r[4] : 0, dp = r[10] - r[8];
-      return `<tr><td class="n">${i + 1}</td><td class="rider">${rl(r[0], r[1])}${r[5] ? '<span class="jb" title="Sigue siendo joven en ' + P.year + '">J</span>' : ''}</td><td class="team">${esc(r[2])}${r[7] && r[7] !== r[2] ? `<div class="sub muted small">antes ${esc(r[7])}</div>` : ''}</td><td class="n">${r[6] || ''}</td>
+      return `<tr><td class="n">${i + 1}</td><td class="rider">${rl(r[0], r[1])}${r[5] ? '<span class="jb" title="Sigue siendo joven en ' + P.year + '">J</span>' : ''}</td><td class="team">${esc(r[2])}${divBadge(r[2])}${r[7] && r[7] !== r[2] ? `<div class="sub muted small">antes ${esc(r[7])}</div>` : ''}</td><td class="n">${r[6] || ''}</td>
         <td class="n">${fmtN(r[3])} ${dm ? `<span class="${dm > 0 ? 'up' : 'down'} small">${dm > 0 ? '+' : ''}${fmtN(dm)}</span>` : ''}</td><td class="n muted">${fmtN(r[8])} <small>(${r[9]} d)</small></td><td class="n strong">${fmtN(r[10])}${r[12] ? `<div class="sub muted small">${fmtN(r[12])} de jóvenes</div>` : ''}</td><td class="n ${dp > 0 ? 'up' : 'down'}">${dp > 0 ? '+' : ''}${fmtN(dp)}</td></tr>`;
     }).join('');
     const note = view === 'jo' ? `Corredores que seguirán siendo jóvenes (J) en ${P.year}: además de lo que da su media, suman la clasificación de jóvenes de cada carrera.` : view === 'su' ? `Los que más puntos ganarían respecto a ${P.from}: suben mucho de media, cambian a un equipo donde tendrán más galones o el año pasado corrieron pocos días.` : `Todos los corredores con equipo en ${P.year}, ordenados por los puntos estimados. Se supone que corren los mismos días que en ${P.from} (80 si corrieron poco).`;
