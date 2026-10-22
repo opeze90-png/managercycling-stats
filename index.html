@@ -2947,11 +2947,34 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
   const hhmm = d => d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
   const dataLabel = () => { const g = D.generated ? new Date(D.generated) : null; return g ? `Datos del ${g.toLocaleDateString('es-ES')} ${hhmm(g)}` : 'Datos guardados'; };
   // última novedad de la web oficial que ya está en los datos (el servidor la comprueba cada 10 minutos)
+  // Estado frente a la web oficial: cuándo la comprobó el servidor por última vez (GitHub Actions, API pública)
+  // y cuál es el último resultado que hay. Así se ve que está al día aunque la oficial no publique nada nuevo.
+  const REPO = CONFIG.repo || 'opeze90-png/managercycling-stats';
+  let lastCheck = null;
+  async function serverCheck() {
+    try {
+      const r = await fetch(`https://api.github.com/repos/${REPO}/actions/workflows/actualizar.yml/runs?per_page=1&status=success`, { cache: 'no-store' });
+      if (!r.ok) return null;
+      const j = await r.json(); const w = j.workflow_runs && j.workflow_runs[0];
+      if (w) lastCheck = new Date(w.updated_at || w.run_started_at);
+    } catch (e) { /* sin conexión con GitHub: se usa lo que hay */ }
+    return lastCheck;
+  }
+  const ago = d => { const m = Math.round((Date.now() - d) / 60000); return m < 1 ? 'ahora mismo' : m < 60 ? `hace ${m} min` : m < 1440 ? `hace ${Math.round(m / 60)} h` : `el ${d.toLocaleDateString('es-ES', { day: 'numeric', month: 'numeric' })}`; };
+  const lastResult = () => {
+    const ys = Object.keys(D.official || {}); if (!ys.length) return null;
+    const y = Math.max(...ys);
+    const evs = IX ? IX.events.filter(e => e.s === y && e.race && e.race.o) : [];
+    let best = null;
+    for (const e of evs) { const r = e.race, d = status(e).k === 'live' ? addDays(r.start, r.st.length - 1) : (r.end || r.start); if (!best || d > best.d || (d === best.d && r.o > best.r.o)) best = { d, r }; }
+    return best;
+  };
   const offLabel = fresh => {
     const ys = Object.keys(D.official || {}); if (!ys.length) return '';
-    const a = new Date(D.official[Math.max(...ys)].at); if (isNaN(a)) return '';
-    const day = a.toDateString() === new Date().toDateString() ? hhmm(a) : `${a.toLocaleDateString('es-ES', { day: 'numeric', month: 'numeric' })} ${hhmm(a)}`;
-    return `${fresh ? 'Datos nuevos de la web oficial' : 'Al día con la web oficial'} (${day})`;
+    const lr = lastResult();
+    const chk = lastCheck ? `comprobada ${ago(lastCheck)}` : '';
+    const last = lr ? `último resultado: ${lr.r.name}${lr.r.multi && lr.r.st.length ? ' (' + lr.r.st[lr.r.st.length - 1].l.toLowerCase() + ')' : ''} · ${dshort(lr.d)}` : '';
+    return [`${fresh ? 'Datos nuevos de la web oficial' : 'Al día con la web oficial'}${chk ? ' (' + chk + ')' : ''}`, last].filter(Boolean).join(' · ');
   };
   let updating = false;
   function setBtn(busy) { const b = $('#refresh'); if (b) { b.disabled = busy; b.classList.toggle('busy', busy); } }
@@ -2969,7 +2992,7 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
     updating = true; setBtn(true);
     try {
       if (manual) setLive('busy', 'Conectando con la web oficial…');
-      const fresh = await refreshSnapshot();
+      const [fresh] = await Promise.all([refreshSnapshot(), serverCheck()]);
       if (fresh) { state.scrollTop = false; route(); }
       const forum = await checkForum(manual);
       setLive(forum.err && !offLabel() ? 'off' : 'ok', [offLabel(fresh) || dataLabel(), forum.msg].filter(Boolean).join(' · '));
