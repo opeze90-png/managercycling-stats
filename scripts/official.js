@@ -120,5 +120,35 @@
     return { year, transfers, retired };
   }
 
-  G.MCOfficial = { BASE, fetchSeason, fetchMarket, jsonAfter, unescape };
+  // Plantillas con medias (atributos) de una temporada: /plantillas?temporada=AAAA, 60 corredores por página
+  // fila = [idCorredor, nombre, equipo, edad, días, puntos, rankPCS, LLA..REC (14), MED, salario]
+  const ROSTER_ATTR = ['LLA', 'MON', 'MM', 'COL', 'CRI', 'PRL', 'PAV', 'SPR', 'ACE', 'DES', 'COM', 'ENE', 'RES', 'REC', 'MED'];
+  const numES = v => { v = String(v || '').replace(/\./g, '').replace(',', '.').replace(/[^\d.-]/g, ''); return v === '' || v === '-' ? null : +v; };
+  function parseRoster(html, season) {
+    const out = [];
+    const tb = (html.split('<tbody')[1] || '').split('</tbody>')[0];
+    for (const tr of tb.split('<tr').slice(1)) {
+      const id = (tr.match(/\/ciclistas\/(\d+)/) || [])[1];
+      if (!id) continue;
+      const th = (tr.match(/<th[^>]*>([\s\S]*?)<\/th>/) || [])[1] || '';
+      const cell = {};
+      for (const m of tr.matchAll(/<td[^>]*data-label="([^"]+)"[^>]*>([\s\S]*?)<\/td>/g)) {
+        const team = m[2].match(/class="roster-mobile-team">([^<]*)</);
+        cell[m[1]] = team ? txt(team[1]) : txt(m[2]);
+      }
+      out.push([+id, txt(th), cell['Equipo'] || '', numES(cell['Edad']), numES(cell['Días']), numES(cell['Pts. MC']), numES(cell['Rank. PCS']), ...ROSTER_ATTR.map(k => numES(cell[k])), numES(cell['Salario ' + season])]);
+    }
+    return out;
+  }
+  async function fetchRosters(opts) {
+    const all = [];
+    for (let p = 1; p <= 80; p++) {
+      const rows = parseRoster(await opts.get(`/plantillas?temporada=${opts.season}&pagina=${p}&ordenar=ciclista&sentido=asc`), opts.season);
+      all.push(...rows);
+      if (rows.length < 60) break;
+    }
+    return all;
+  }
+
+  G.MCOfficial = { BASE, fetchSeason, fetchMarket, fetchRosters, parseRoster, jsonAfter, unescape };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -20,6 +20,7 @@ require(path.join(here, 'mcparse.js'));
 require(path.join(here, 'build.js'));
 require(path.join(here, 'forum.js'));
 require(path.join(here, 'official.js'));
+require(path.join(here, 'predict.js'));
 
 const ROOT = path.resolve(here, '..');
 const DATA = path.join(ROOT, 'data');
@@ -113,6 +114,37 @@ async function fetchMarket() {
   console.log(`Mercado ${m.year}: ${m.transfers.length} traspasos de corredores, ${m.retired.length} retirados.`);
 }
 
+// plantillas con medias de esta temporada y de la próxima (para la predicción): raw/oficial/plantillas.json
+const rosterFile = path.join(RAW, 'oficial', 'plantillas.json');
+async function fetchRostersAll(years) {
+  const old = fs.existsSync(rosterFile) ? JSON.parse(fs.readFileSync(rosterFile, 'utf8')) : null;
+  const chk = rosterFile.replace(/\.json$/, '.checked'); // fuera de la huella de datos: comprobar no obliga a reconstruir
+  const last = fs.existsSync(chk) ? Date.parse(fs.readFileSync(chk, 'utf8')) : 0;
+  if (old && Date.now() - last < 2 * 3600e3 && years.every(y => old.seasons[y])) return; // cada 2 horas basta
+  const get = async u => { const r = await fetch(OFFICIAL + u, { headers: { 'user-agent': 'managercycling-stats' }, signal: AbortSignal.timeout(60000) }); if (!r.ok) throw new Error(u + ' ' + r.status); return r.text(); };
+  const seasons = {};
+  for (const y of years) { seasons[y] = await MCOfficial.fetchRosters({ get, season: y }); if (seasons[y].length < 500) throw new Error(`plantillas ${y} incompletas`); }
+  const now = new Date().toISOString();
+  fs.mkdirSync(path.dirname(rosterFile), { recursive: true });
+  fs.writeFileSync(chk, now);
+  if (old && JSON.stringify(old.seasons) === JSON.stringify(seasons)) { console.log('Plantillas y medias: sin cambios.'); return; }
+  fs.writeFileSync(rosterFile, JSON.stringify({ at: now, seasons }));
+  console.log(`Plantillas y medias: ${years.map(y => `${seasons[y].length} corredores en ${y}`).join(', ')}.`);
+}
+function predictNext(offs) {
+  if (!fs.existsSync(rosterFile) || !offs.length) return undefined;
+  const R = JSON.parse(fs.readFileSync(rosterFile, 'utf8'));
+  const off = offs.sort((a, b) => b.season - a.season)[0], cur = off.season, next = cur + 1;
+  if (!R.seasons[cur] || !R.seasons[next]) return undefined;
+  const youth = {}; let teamClass = 0;
+  for (const ev of off.events) for (const x of ev.rows) { if (x[0] === 'Jóvenes' && x[2] != null) youth[x[2]] = (youth[x[2]] || 0) + (x[6] || 0); if (x[0] === 'Equipos') teamClass += x[6] || 0; }
+  const t0 = Date.now();
+  const p = MCPredict.run(R.seasons[cur], R.seasons[next], youth, teamClass, { year: next, from: cur });
+  p.at = R.at;
+  console.log(`Predicción ${next}: modelo con ${p.quality.n} corredores (R² ${p.quality.r2}, correlación ${p.quality.corr}, por equipos ${p.quality.teamCorr}) en ${Math.round((Date.now() - t0) / 1000)} s.`);
+  return p;
+}
+
 // comprobación: los totales que calcula la web deben ser los de las clasificaciones oficiales
 function checkOfficial(data, off) {
   if (!off.rank) return;
@@ -166,7 +198,8 @@ function rebuild() {
     fs.writeFileSync(path.join(DATA, `s${s}.json`), JSON.stringify(part));
   }
   const market = fs.existsSync(marketFile) ? JSON.parse(fs.readFileSync(marketFile, 'utf8')) : undefined;
-  const core = { v: data.v, generated: data.generated, inputs: inputsHash(), market, seasons: data.seasons, teams: data.teams, riders: data.riders, oid: data.oid, offSeasons: data.offSeasons };
+  let pred; try { pred = predictNext(offs); } catch (e) { console.log('No se pudo calcular la predicción: ' + e.message); }
+  const core = { v: data.v, generated: data.generated, inputs: inputsHash(), market, pred, seasons: data.seasons, teams: data.teams, riders: data.riders, oid: data.oid, offSeasons: data.offSeasons };
   fs.writeFileSync(path.join(DATA, 'core.json'), JSON.stringify(core));
   console.log(`Datos reconstruidos desde ${n} temas: ${data.races.length} carreras, ${data.ins.length} inscripciones, ${data.riders.length} corredores.`);
 }
@@ -221,6 +254,7 @@ function rebuild() {
       try { await fetchOfficial(y); } catch (e) { console.log(`No se pudo leer la web oficial (${y}): ${e.message}. Se mantiene la última copia guardada.`); }
     }
     try { await fetchMarket(); } catch (e) { console.log('No se pudo leer el mercado de la web oficial: ' + e.message); }
+    try { await fetchRostersAll([cfg.current.year, cfg.current.year + 1]); } catch (e) { console.log('No se pudieron leer las plantillas de la web oficial: ' + e.message); }
     const oldOff = path.join(RAW, `oficial-${cfg.current.year}.json`); if (fs.existsSync(oldOff)) fs.unlinkSync(oldOff);
   }
   // Topics saved before pictures were read: download them again, newest first, while time remains.
