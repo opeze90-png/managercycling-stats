@@ -354,6 +354,12 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
 .mk-deals { list-style: none; margin: 0; padding: 0; }
 .mk-deals > li { padding: 10px 0; border-bottom: 1px solid var(--line); }
 .mk-h { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+
+/* Predicción */
+.pq { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; margin-top: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); font-size: 14px; }
+.pq b { font-family: var(--f-display); font-size: 22px; color: var(--ink); }
+.pq small { color: var(--muted); margin-right: 8px; }
+.pq span { color: var(--muted); margin-right: 6px; }
 </style>
 
 <header class="bar">
@@ -366,6 +372,7 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
       <a href="#ranking" data-p="ranking">Ranking</a>
       <a href="#equipos" data-p="equipos">Equipos</a>
       <a href="#mercado" data-p="mercado">Mercado</a>
+      <a href="#prediccion" data-p="prediccion">Predicción</a>
       <a href="#stats" data-p="stats">Stats</a>
       <a href="#miticas" data-p="miticas">Míticas</a>
       <a href="#hitos" data-p="hitos">Hitos</a>
@@ -2542,6 +2549,48 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
         <section class="card"><h2 class="h2">Traspasos confirmados</h2><p class="muted small">${M.transfers.length} corredores en ${groups.size} acuerdos · puntos y días de ${y}</p><ul class="mk-deals">${deals}</ul></section>
       </div>`;
   }
+  // ---------- predicción de la próxima temporada ----------
+  function pagePred() {
+    setTitle('Predicción'); setNav('prediccion');
+    const P = D.pred;
+    if (!P) return `<header class="ph"><h1 class="h1">Predicción</h1><p class="muted">Todavía no hay datos de plantillas y medias de la próxima temporada.</p></header>`;
+    const view = state.predView || 'eq';
+    const ridOfOid = new Map(Object.entries(D.oid || {}).map(([r, o]) => [o, +r]));
+    const st = IX.season.get(P.from);
+    const tidOf = name => { const k = MC.teamKey(name || ''); return D.teams.findIndex(t => MC.teamKey(t) === k); };
+    const rl = (oid, name) => { const r = ridOfOid.get(oid); return r != null ? `<a class="rl" href="#corredor-${IX.riderSlug[r]}">${esc(rname(r))}</a>` : esc(String(name).replace(/\s*\(J\)\s*/, '')); };
+    const clean = n => esc(String(n).replace(/\s*\(J\)\s*/, ''));
+    const q = P.quality;
+    const head = `<header class="ph"><div class="ph-meta"><span class="eyebrow">Temporada ${P.year} · estimación</span></div><h1 class="h1">Predicción clasificación ${P.year}</h1>
+      <p class="muted">Puntos estimados para ${P.year} con las plantillas (traspasos incluidos) y las medias nuevas de la web oficial. El modelo aprende de los ${q.n} corredores de ${P.from} qué puntos saca cada perfil de atributos, edad, condición de joven y papel en su equipo, y lo aplica a las medias de ${P.year}. Los jóvenes (J) que lo siguen siendo suman además su clasificación de jóvenes, y los que crecen mucho de media lo notan en la predicción.</p>
+      <div class="pq"><span title="Validación cruzada: cada corredor de ${P.from} se predice con un modelo que no lo ha visto">Acierto comprobado con ${P.from}</span><b>${Math.round(q.corr * 100)}%</b><small>correlación por corredor</small><b>${Math.round(q.teamCorr * 100)}%</b><small>por equipos</small><b>${String(Math.round(q.r2 * 100))}%</b><small>de la variación explicada</small></div></header>`;
+    const seg = `<div class="seg seg-wide">${[['eq', 'Equipos'], ['co', 'Corredores'], ['jo', 'Jóvenes'], ['su', 'Más suben']].map(([k, l]) => `<a href="#prediccion" data-pview="${k}" class="${view === k ? 'on' : ''}">${l}</a>`).join('')}</div>`;
+    if (view === 'eq') {
+      const real = st ? [...st.teams.entries()].filter(([t, o]) => t >= 0 && o.riders.size >= 3).sort((a, b) => (b[1].pts || b[1].rpts) - (a[1].pts || a[1].rpts)) : [];
+      const realRank = new Map(real.map(([t, o], i) => [t, { r: i + 1, pts: o.pts || o.rpts }]));
+      const byTeam = new Map(); for (const r of P.riders) { if (!byTeam.has(r[2])) byTeam.set(r[2], []); byTeam.get(r[2]).push(r); }
+      const rows = P.teams.map((t, i) => {
+        const tid = tidOf(t[0]), rr = realRank.get(tid), d = rr ? rr.r - (i + 1) : null;
+        const top = (byTeam.get(t[0]) || []).slice(0, 10);
+        return `<tr><td class="n">${i + 1}</td><td>${tid >= 0 ? tlink(tid, 'strongish') : esc(t[0])}${t[1] < 28 ? ` <span class="muted small" title="Aún le faltan corredores (draft, Rastro, agentes libres)">${t[1]} corredores</span>` : ''}<details class="mk-d"><summary class="small muted">Sus 10 mejores según la predicción</summary><ul class="mk-l">${top.map(r => `<li>${rl(r[0], r[1])}${r[5] ? '<span class="jb">J</span>' : ''} <span class="muted small">MED ${fmtN(r[3])}${r[7] && r[7] !== r[2] ? ` · llega de ${esc(r[7])}` : ''}</span><span class="n">${fmtN(r[10])}</span></li>`).join('')}</ul></details></td>
+          <td class="n">${fmtN(t[2])}</td><td class="n muted">${fmtN(t[3])}</td><td class="n strong">${fmtN(t[4])}</td><td class="n muted">${rr ? `${fmtN(rr.pts)} (${rr.r}º)` : '—'}</td><td class="n">${d == null ? '' : d > 0 ? `<span class="up">▲${d}</span>` : d < 0 ? `<span class="down">▼${-d}</span>` : '<span class="muted">=</span>'}</td></tr>`;
+      }).join('');
+      return `${head}${seg}<p class="muted small">Puntos de equipo estimados = puntos de sus corredores + su parte de la clasificación por equipos. Las plantillas de ${P.year} aún no están completas (faltan el draft, el Rastro y los agentes libres): los equipos con menos corredores todavía pueden sumar.</p>
+        <section class="card"><div class="tw"><table class="t t-rank"><thead><tr><th class="n">#</th><th>Equipo ${P.year}</th><th class="n">De sus corredores</th><th class="n">Clas. equipos</th><th class="n">Pts ${P.year} (estim.)</th><th class="n">Real ${P.from}</th><th class="n">Puesto</th></tr></thead><tbody>${rows}</tbody></table></div></section>`;
+    }
+    let list = P.riders.slice();
+    if (view === 'jo') list = list.filter(r => r[5]);
+    if (view === 'su') list = list.filter(r => r[9] >= 20).sort((a, b) => (b[10] - b[8]) - (a[10] - a[8]));
+    const lim = 300;
+    const rows = list.slice(0, lim).map((r, i) => {
+      const dm = r[4] != null ? r[3] - r[4] : 0, dp = r[10] - r[8];
+      return `<tr><td class="n">${i + 1}</td><td class="rider">${rl(r[0], r[1])}${r[5] ? '<span class="jb" title="Sigue siendo joven en ' + P.year + '">J</span>' : ''}</td><td class="team">${esc(r[2])}${r[7] && r[7] !== r[2] ? `<div class="sub muted small">antes ${esc(r[7])}</div>` : ''}</td><td class="n">${r[6] || ''}</td>
+        <td class="n">${fmtN(r[3])} ${dm ? `<span class="${dm > 0 ? 'up' : 'down'} small">${dm > 0 ? '+' : ''}${fmtN(dm)}</span>` : ''}</td><td class="n muted">${fmtN(r[8])} <small>(${r[9]} d)</small></td><td class="n strong">${fmtN(r[10])}${r[12] ? `<div class="sub muted small">${fmtN(r[12])} de jóvenes</div>` : ''}</td><td class="n ${dp > 0 ? 'up' : 'down'}">${dp > 0 ? '+' : ''}${fmtN(dp)}</td></tr>`;
+    }).join('');
+    const note = view === 'jo' ? `Corredores que seguirán siendo jóvenes (J) en ${P.year}: además de lo que da su media, suman la clasificación de jóvenes de cada carrera.` : view === 'su' ? `Los que más puntos ganarían respecto a ${P.from}: suben mucho de media, cambian a un equipo donde tendrán más galones o el año pasado corrieron pocos días.` : `Todos los corredores con equipo en ${P.year}, ordenados por los puntos estimados. Se supone que corren los mismos días que en ${P.from} (80 si corrieron poco).`;
+    return `${head}${seg}<p class="muted small">${note}</p><div class="toolbar"><div class="filter"><input id="tfilter" type="search" placeholder="Buscar corredor o equipo" aria-label="Filtrar"></div></div>
+      <section class="card"><div class="tw"><table class="t t-rank" data-filter><thead><tr><th class="n">#</th><th>Corredor</th><th>Equipo ${P.year}</th><th class="n">Edad</th><th class="n">MED ${P.year}</th><th class="n">Pts ${P.from}</th><th class="n">Pts ${P.year} (estim.)</th><th class="n">Cambio</th></tr></thead><tbody>${rows}</tbody></table></div></section>`;
+  }
   // ---------- noticias (redacción automática a partir de los resultados) ----------
   // Cada noticia se escribe sola con los datos: quién gana, por cuánto, qué supone en su temporada, en la
   // historia de la carrera, en el ranking… El texto varía según el caso para que no suenen todas iguales.
@@ -2760,6 +2809,7 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
       case 'hitos': html = pageHitos(); break;
       case 'noticias': html = pageNews(); break;
       case 'mercado': html = pageMarket(); break;
+      case 'prediccion': html = pagePred(); break;
       default: html = pageHome();
     }
     const main = $('#main');
@@ -2794,9 +2844,10 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
     if (ds.ncat) { state.newsCat = ds.ncat; state.newsLim = 30; }
     if (ds.tmode) state.teamMode = ds.tmode;
     if (ds.mkt) state.mktBase = ds.mkt;
+    if (ds.pview) state.predView = ds.pview;
     if (ds.nmore) { e.preventDefault(); state.newsLim = (state.newsLim || 30) + 30; state.scrollTop = false; route(); return; }
     const target = a.getAttribute('href');
-    if (target && target.startsWith('#') && target === location.hash && (ds.tab !== undefined || ds.season || ds.cal || ds.rank || ds.scope || ds.hcat || ds.ncat || ds.tmode || ds.mkt || ds.hl !== undefined)) { e.preventDefault(); state.scrollTop = ds.tab !== undefined ? false : true; if (ds.tab !== undefined) state.scrollTop = false; route(); }
+    if (target && target.startsWith('#') && target === location.hash && (ds.tab !== undefined || ds.season || ds.cal || ds.rank || ds.scope || ds.hcat || ds.ncat || ds.tmode || ds.mkt || ds.pview || ds.hl !== undefined)) { e.preventDefault(); state.scrollTop = ds.tab !== undefined ? false : true; if (ds.tab !== undefined) state.scrollTop = false; route(); }
     else if (target && target.startsWith('#') && (ds.tab !== undefined || ds.season || ds.cal || ds.rank || ds.scope || ds.hcat)) state.scrollTop = !(ds.tab !== undefined);
   });
   document.addEventListener('change', e => {
