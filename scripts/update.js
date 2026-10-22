@@ -199,7 +199,10 @@ function rebuild() {
   }
   const market = fs.existsSync(marketFile) ? JSON.parse(fs.readFileSync(marketFile, 'utf8')) : undefined;
   let pred; try { pred = predictNext(offs); } catch (e) { console.log('No se pudo calcular la predicción: ' + e.message); }
-  const core = { v: data.v, generated: data.generated, inputs: inputsHash(), market, pred, seasons: data.seasons, teams: data.teams, riders: data.riders, oid: data.oid, offSeasons: data.offSeasons };
+  // categoría de cada equipo (WT / CP) según la clasificación oficial más reciente
+  const div = {};
+  for (const o of offs.slice().sort((a, b) => a.season - b.season)) for (const t of (o.rank && o.rank.teams) || []) if (t[3]) div[t[1]] = t[3];
+  const core = { v: data.v, generated: data.generated, inputs: inputsHash(), market, pred, div: Object.keys(div).length ? div : undefined, seasons: data.seasons, teams: data.teams, riders: data.riders, oid: data.oid, offSeasons: data.offSeasons };
   fs.writeFileSync(path.join(DATA, 'core.json'), JSON.stringify(core));
   console.log(`Datos reconstruidos desde ${n} temas: ${data.races.length} carreras, ${data.ins.length} inscripciones, ${data.riders.length} corredores.`);
 }

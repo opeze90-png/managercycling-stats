@@ -57,7 +57,7 @@
     try {
       const rr = jsonAfter(unescape(await opts.get('/clasificaciones/ciclistas' + q)), 'rows', '"cyclistId"');
       const tt = jsonAfter(unescape(await opts.get('/clasificaciones' + q)), 'rows', '"teamId"');
-      if (rr && tt) rank = { riders: rr.map(x => [x.cyclistId, x.cyclist, x.points, x.daysCompetition]), teams: tt.map(x => [x.teamId, x.team, x.points]) };
+      if (rr && tt) rank = { riders: rr.map(x => [x.cyclistId, x.cyclist, x.points, x.daysCompetition]), teams: tt.map(x => [x.teamId, x.team, x.points, x.division || '']) };
     } catch (e) { log('No se pudieron leer las clasificaciones generales: ' + e.message); }
     // fecha, categoría y país de cada prueba: salen en la ficha de los corredores que la corrieron
     const meta = Object.assign({}, opts.meta || {});
