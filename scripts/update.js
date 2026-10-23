@@ -204,7 +204,14 @@ function rebuild() {
   // categoría de cada equipo (WT / CP) según la clasificación oficial más reciente
   const div = {};
   for (const o of offs.slice().sort((a, b) => a.season - b.season)) for (const t of (o.rank && o.rank.teams) || []) if (t[3]) div[t[1]] = t[3];
-  const core = { v: data.v, generated: data.generated, inputs: inputsHash(), market, pred, div: Object.keys(div).length ? div : undefined, seasons: data.seasons, teams: data.teams, riders: data.riders, oid: data.oid, offSeasons: data.offSeasons };
+  // atributos (medias) de la web oficial por corredor y temporada: {keys, seasons: {año: {idOficial: [LLA..REC, MED, edad]}}}
+  let attrs;
+  if (fs.existsSync(rosterFile)) {
+    const R = JSON.parse(fs.readFileSync(rosterFile, 'utf8'));
+    attrs = { keys: ['LLA', 'MON', 'MM', 'COL', 'CRI', 'PRL', 'PAV', 'SPR', 'ACE', 'DES', 'COM', 'ENE', 'RES', 'REC', 'MED'], at: R.at, seasons: {} };
+    for (const [y, rows] of Object.entries(R.seasons)) { const m = {}; for (const r of rows) m[r[0]] = [...r.slice(7, 22), r[3]]; attrs.seasons[y] = m; }
+  }
+  const core = { v: data.v, generated: data.generated, inputs: inputsHash(), market, pred, attrs, div: Object.keys(div).length ? div : undefined, seasons: data.seasons, teams: data.teams, riders: data.riders, oid: data.oid, offSeasons: data.offSeasons };
   fs.writeFileSync(path.join(DATA, 'core.json'), JSON.stringify(core));
   console.log(`Datos reconstruidos desde ${n} temas: ${data.races.length} carreras, ${data.ins.length} inscripciones, ${data.riders.length} corredores.`);
 }
