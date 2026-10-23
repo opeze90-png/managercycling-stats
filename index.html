@@ -365,6 +365,19 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
 .dv { display: inline-block; margin-left: 5px; font-size: 10px; font-weight: 700; letter-spacing: .04em; padding: 0 4px; border-radius: 3px; vertical-align: 1px; line-height: 15px; }
 .dv-wt { background: var(--bar); color: var(--gc); }
 .dv-cp { background: var(--surface-2); color: var(--muted); border: 1px solid var(--line); }
+
+/* Atributos (colores de la web oficial) */
+.sc { display: inline-block; min-width: 26px; padding: 1px 4px; border-radius: 4px; font-size: 12px; font-weight: 700; text-align: center; line-height: 18px; font-variant-numeric: tabular-nums; }
+.sc.s0 { color: var(--muted); }
+.sc.s50 { background: #52565a; color: #fff; }
+.sc.s65 { background: #4a87ff; color: #fff; }
+.sc.s70 { background: #5afc86; color: #000; }
+.sc.s74 { background: #f9e01f; color: #000; }
+.sc.s78 { background: #f7b800; color: #000; }
+.sc.s82 { background: #f22253; color: #fff; }
+.t-attr td, .t-attr th, .t-attrs td, .t-attrs th { padding-left: 3px; padding-right: 3px; }
+.t-attr { margin-bottom: 6px; }
+.t-diff td { border-top: 0; }
 </style>
 
 <header class="bar">
@@ -1845,6 +1858,24 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
   // categoría del equipo (WT o CP) en las temporadas que vienen de la web oficial
   const divOf = name => { if (!D.div || !(D.offSeasons || []).includes(state.season)) return ''; const d = D.div[name]; if (d) return d; const k = MC.teamKey(name || ''); for (const n in D.div) if (MC.teamKey(n) === k) return D.div[n]; return ''; };
   const divBadge = name => { const d = divOf(name); return d ? `<span class="dv dv-${d.toLowerCase()}" title="${d === 'WT' ? 'WorldTour' : 'Continental Profesional'}">${esc(d)}</span>` : ''; };
+  // atributos como en la web oficial: fichas de color según el valor
+  const ATTR_NAME = { LLA: 'Llano', MON: 'Montaña', MM: 'Media montaña', COL: 'Colinas', CRI: 'Contrarreloj', PRL: 'Prólogo', PAV: 'Pavé', SPR: 'Sprint', ACE: 'Aceleración', DES: 'Descenso', COM: 'Combatividad', ENE: 'Energía', RES: 'Resistencia', REC: 'Recuperación', MED: 'Media' };
+  const scoreCls = v => v >= 82 ? 's82' : v >= 78 ? 's78' : v >= 74 ? 's74' : v >= 70 ? 's70' : v >= 65 ? 's65' : 's50';
+  const chip = (v, k) => v == null ? '<span class="sc s0">—</span>' : `<span class="sc ${scoreCls(v)}" title="${ATTR_NAME[k] || k}: ${fmtN(v)}">${k === 'MED' ? fmtN(v) : v}</span>`;
+  const attrsOf = (oid, y) => D.attrs && D.attrs.seasons[y] ? D.attrs.seasons[y][oid] : null;
+  function attrsTable(oid) {
+    if (!D.attrs || oid == null) return '';
+    const ys = Object.keys(D.attrs.seasons).sort();
+    const rows = ys.map(y => [y, attrsOf(oid, y)]).filter(([, a]) => a);
+    if (!rows.length) return '';
+    const K = D.attrs.keys, last = rows[rows.length - 1], prev = rows.length > 1 ? rows[rows.length - 2] : null;
+    const pred = D.pred && D.pred.riders.find(r => r[0] === oid);
+    return `<section class="card"><div class="card-h"><h2 class="h2">Atributos</h2><a class="more" href="${OFFWEB}/ciclistas/${oid}" target="_blank" rel="noopener">web oficial</a></div>
+      <div class="tw"><table class="t t-attr"><thead><tr><th>Temp.</th>${K.map(k => `<th class="n" title="${ATTR_NAME[k]}">${k}</th>`).join('')}</tr></thead><tbody>
+      ${rows.map(([y, a]) => `<tr><td>${y}${+y > IX.seasons[0] ? ' <span class="muted small">próxima</span>' : ''}</td>${K.map((k, i) => `<td class="n">${chip(a[i], k)}</td>`).join('')}</tr>`).join('')}
+      ${prev ? `<tr class="t-diff"><td class="muted small">cambio</td>${K.map((k, i) => { const d = Math.round((last[1][i] - prev[1][i]) * 100) / 100; return `<td class="n small ${d > 0 ? 'up' : d < 0 ? 'down' : 'muted'}">${d > 0 ? '+' : ''}${d ? fmtN(d) : '='}</td>`; }).join('')}</tr>` : ''}
+      </tbody></table></div>${last[1][15] ? `<p class="muted small">${last[1][15]} años en ${last[0]}.</p>` : ''}${pred ? `<p class="small">Predicción ${D.pred.year}: <strong>${fmtN(pred[10])} pts</strong> con ${esc(pred[2])} · <a href="#prediccion">ver predicción</a></p>` : ''}</section>`;
+  }
   const tlink = (tid, cls = '') => tid < 0 ? '' : `<a class="tl ${cls}" href="#equipo-${IX.teamSlug[tid]}">${esc(tname(tid))}</a>${divBadge(tname(tid))}`;
   const evlink = ev => `<a class="el" href="#carrera-${ev.id}">${esc(ev.name)}</a>`;
   function clsTier(cls) {
@@ -2128,6 +2159,7 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
         ${kpi('Días de líder', so ? so.lead : 0, `${career.lead} en total`)}
         ${kpi('Puntos MC', so ? fmtN(so.pts) : 0, rankPos ? `${rankPos}º del ranking ${ySel}` : '')}
       </div>
+      ${attrsTable(D.oid ? D.oid[rid] : null)}
       <div class="grid g-rider">
         <div class="col">
           <section class="card"><div class="card-h"><h2 class="h2">Resultados</h2><div class="seg">${seasons.map(y => `<a href="#corredor-${slug}" data-season="${y}" class="${y === ySel ? 'on' : ''}">${y}</a>`).join('')}</div></div>
@@ -2598,14 +2630,20 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
     if (view === 'jo') list = list.filter(r => r[5]);
     if (view === 'su') list = list.filter(r => r[9] >= 20).sort((a, b) => (b[10] - b[8]) - (a[10] - a[8]));
     const lim = 300;
+    // atributos como en la web oficial: los de la próxima temporada o los de esta
+    const ay = state.predAttr || '';
+    const AK = D.attrs ? D.attrs.keys.slice(0, 14) : [];
+    const aCells = r => { if (!ay) return ''; const a = attrsOf(r[0], ay), b = ay == P.year ? attrsOf(r[0], P.from) : null; return AK.map((k, i) => { const v = a ? a[i] : null, d = b && v != null ? v - b[i] : 0; return `<td class="n">${chip(v, k)}${d ? `<div class="sub small ${d > 0 ? 'up' : 'down'}">${d > 0 ? '+' : ''}${d}</div>` : ''}</td>`; }).join(''); };
+    const aHead = ay ? AK.map(k => `<th class="n" title="${ATTR_NAME[k]}">${k}</th>`).join('') : '';
+    const aSeg = D.attrs ? `<div class="seg"><a href="#prediccion" data-pattr="" class="${!ay ? 'on' : ''}">Sin atributos</a><a href="#prediccion" data-pattr="${P.from}" class="${ay == P.from ? 'on' : ''}">Atributos ${P.from}</a><a href="#prediccion" data-pattr="${P.year}" class="${ay == P.year ? 'on' : ''}">Atributos ${P.year}</a></div>` : '';
     const rows = list.slice(0, lim).map((r, i) => {
       const dm = r[4] != null ? r[3] - r[4] : 0, dp = r[10] - r[8];
       return `<tr><td class="n">${i + 1}</td><td class="rider">${rl(r[0], r[1])}${r[5] ? '<span class="jb" title="Sigue siendo joven en ' + P.year + '">J</span>' : ''}</td><td class="team">${esc(r[2])}${dvB(div27.get(r[2]))}${r[7] && r[7] !== r[2] ? `<div class="sub muted small">antes ${esc(r[7])}</div>` : ''}</td><td class="n">${r[6] || ''}</td>
-        <td class="n">${fmtN(r[3])} ${dm ? `<span class="${dm > 0 ? 'up' : 'down'} small">${dm > 0 ? '+' : ''}${fmtN(dm)}</span>` : ''}</td><td class="n muted">${fmtN(r[8])} <small>(${r[9]} d)</small></td><td class="n strong">${fmtN(r[10])}${r[12] ? `<div class="sub muted small">${fmtN(r[12])} de jóvenes</div>` : ''}</td><td class="n ${dp > 0 ? 'up' : 'down'}">${dp > 0 ? '+' : ''}${fmtN(dp)}</td></tr>`;
+        ${aCells(r)}<td class="n">${ay ? chip(ay == P.year ? r[3] : r[4], 'MED') : fmtN(r[3])} ${dm && ay != P.from ? `<span class="${dm > 0 ? 'up' : 'down'} small">${dm > 0 ? '+' : ''}${fmtN(dm)}</span>` : ''}</td><td class="n muted">${fmtN(r[8])} <small>(${r[9]} d)</small></td><td class="n strong">${fmtN(r[10])}${r[12] ? `<div class="sub muted small">${fmtN(r[12])} de jóvenes</div>` : ''}</td><td class="n ${dp > 0 ? 'up' : 'down'}">${dp > 0 ? '+' : ''}${fmtN(dp)}</td></tr>`;
     }).join('');
     const note = view === 'jo' ? `Corredores que seguirán siendo jóvenes (J) en ${P.year}: además de lo que da su media, suman la clasificación de jóvenes de cada carrera.` : view === 'su' ? `Los que más puntos ganarían respecto a ${P.from}: suben mucho de media, cambian a un equipo donde tendrán más galones o el año pasado corrieron pocos días.` : `Todos los corredores con equipo en ${P.year}, ordenados por los puntos estimados. Se supone que corren los mismos días que en ${P.from} (80 si corrieron poco).`;
-    return `${head}${seg}<p class="muted small">${note}</p><div class="toolbar"><div class="filter"><input id="tfilter" type="search" placeholder="Buscar corredor o equipo" aria-label="Filtrar"></div></div>
-      <section class="card"><div class="tw"><table class="t t-rank" data-filter><thead><tr><th class="n">#</th><th>Corredor</th><th>Equipo ${P.year}</th><th class="n">Edad</th><th class="n">MED ${P.year}</th><th class="n">Pts ${P.from}</th><th class="n">Pts ${P.year} (estim.)</th><th class="n">Cambio</th></tr></thead><tbody>${rows}</tbody></table></div></section>`;
+    return `${head}${seg}<p class="muted small">${note}</p><div class="toolbar">${aSeg}<div class="filter"><input id="tfilter" type="search" placeholder="Buscar corredor o equipo" aria-label="Filtrar"></div></div>
+      <section class="card"><div class="tw"><table class="t t-rank${ay ? ' t-attrs' : ''}" data-filter><thead><tr><th class="n">#</th><th>Corredor</th><th>Equipo ${P.year}</th><th class="n">Edad</th>${aHead}<th class="n">MED ${ay || P.year}</th><th class="n">Pts ${P.from}</th><th class="n">Pts ${P.year} (estim.)</th><th class="n">Cambio</th></tr></thead><tbody>${rows}</tbody></table></div></section>`;
   }
   // ---------- noticias (redacción automática a partir de los resultados) ----------
   // Cada noticia se escribe sola con los datos: quién gana, por cuánto, qué supone en su temporada, en la
@@ -2861,9 +2899,10 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
     if (ds.tmode) state.teamMode = ds.tmode;
     if (ds.mkt) state.mktBase = ds.mkt;
     if (ds.pview) state.predView = ds.pview;
+    if (ds.pattr !== undefined) state.predAttr = ds.pattr;
     if (ds.nmore) { e.preventDefault(); state.newsLim = (state.newsLim || 30) + 30; state.scrollTop = false; route(); return; }
     const target = a.getAttribute('href');
-    if (target && target.startsWith('#') && target === location.hash && (ds.tab !== undefined || ds.season || ds.cal || ds.rank || ds.scope || ds.hcat || ds.ncat || ds.tmode || ds.mkt || ds.pview || ds.hl !== undefined)) { e.preventDefault(); state.scrollTop = ds.tab !== undefined ? false : true; if (ds.tab !== undefined) state.scrollTop = false; route(); }
+    if (target && target.startsWith('#') && target === location.hash && (ds.tab !== undefined || ds.season || ds.cal || ds.rank || ds.scope || ds.hcat || ds.ncat || ds.tmode || ds.mkt || ds.pview || ds.pattr !== undefined || ds.hl !== undefined)) { e.preventDefault(); state.scrollTop = ds.tab !== undefined ? false : true; if (ds.tab !== undefined) state.scrollTop = false; route(); }
     else if (target && target.startsWith('#') && (ds.tab !== undefined || ds.season || ds.cal || ds.rank || ds.scope || ds.hcat)) state.scrollTop = !(ds.tab !== undefined);
   });
   document.addEventListener('change', e => {
