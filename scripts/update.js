@@ -139,7 +139,9 @@ function predictNext(offs) {
   const youth = {}; let teamClass = 0;
   for (const ev of off.events) for (const x of ev.rows) { if (x[0] === 'Jóvenes' && x[2] != null) youth[x[2]] = (youth[x[2]] || 0) + (x[6] || 0); if (x[0] === 'Equipos') teamClass += x[6] || 0; }
   const t0 = Date.now();
-  const p = MCPredict.run(R.seasons[cur], R.seasons[next], youth, teamClass, { year: next, from: cur });
+  const rank = off.rank && off.rank.teams && off.rank.teams.some(t => t[3]) ? off.rank.teams.map(t => [t[1], t[2], t[3]]) : null;
+  const p = MCPredict.run(R.seasons[cur], R.seasons[next], youth, teamClass, { year: next, from: cur, rank });
+  if (p.div) console.log(`Categorías ${next}: suben ${p.div.up.join(', ')}; bajan ${p.div.down.join(', ')}.`);
   p.at = R.at;
   console.log(`Predicción ${next}: modelo con ${p.quality.n} corredores (R² ${p.quality.r2}, correlación ${p.quality.corr}, por equipos ${p.quality.teamCorr}) en ${Math.round((Date.now() - t0) / 1000)} s.`);
   return p;

@@ -66,12 +66,32 @@
       l.forEach((o, i) => { o.trank = OUT.test(t) ? 15 : i + 1; o.ttop = OUT.test(t) ? 70 : top; o.gap = o.med - l[0].med; });
     }
   }
-  const feats = o => [...o.att, o.med, o.J ? 1 : 0, o.age || 27, o.trank, o.ttop, o.gap];
+  const feats = o => [...o.att, o.med, o.J ? 1 : 0, o.age || 27, o.trank, o.ttop, o.gap, o.div === 'WT' ? 1 : o.div === 'CP' ? 0 : 0.5];
 
   // youth: {idCorredor: puntos de la clasificación de jóvenes este año}; teamClass: puntos totales de la clasificación por equipos
+  // Ascensos y descensos: con la clasificación por equipos de la temporada (equipo, puntos, categoría), los 3
+  // últimos WorldTour bajan a Continental Profesional y los 3 primeros CP suben al WorldTour.
+  function divisionsNext(rankTeams, n = 3) {
+    const cur = {}, next = {}, up = [], down = [];
+    for (const [name, , d] of rankTeams) cur[name] = next[name] = d;
+    const wt = rankTeams.filter(t => t[2] === 'WT').sort((a, b) => b[1] - a[1]);
+    const cp = rankTeams.filter(t => t[2] === 'CP').sort((a, b) => b[1] - a[1]);
+    if (wt.length > n && cp.length > n) {
+      for (const t of wt.slice(-n)) { next[t[0]] = 'CP'; down.push(t[0]); }
+      for (const t of cp.slice(0, n)) { next[t[0]] = 'WT'; up.push(t[0]); }
+    }
+    return { cur, next, up, down };
+  }
+
   function run(cur, next, youth, teamClass, opts = {}) {
     const A = riders(cur), B = riders(next);
     context(A); context(B);
+    // categoría de cada equipo esta temporada y la próxima (si se conoce)
+    const DV = opts.rank ? divisionsNext(opts.rank) : null;
+    const key = n => String(n || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const look = (m, team) => { if (!m) return null; if (m[team]) return m[team]; const k = key(team); for (const t in m) if (key(t) === k) return m[t]; return null; };
+    for (const o of A) o.div = look(DV && DV.cur, o.team);
+    for (const o of B) o.div = look(DV && DV.next, o.team) || (OUT.test(o.team) ? null : 'CP');
     const train = A.filter(o => o.days >= 15);
     const yv = o => Math.log1p(Math.max(0, o.pts - (youth[o.id] || 0)) / o.days * 85);
     const X = train.map(feats), y = train.map(yv);
@@ -99,6 +119,21 @@
     const YJ = A.filter(o => o.J && o.days >= 15);
     const ym = fitGBM(YJ.map(feats), YJ.map(o => Math.log1p((youth[o.id] || 0) / o.days * 85)), { ...gbmOpts, trees: 200, seed: 3 });
     const youthTot = A.reduce((a, o) => a + (youth[o.id] || 0), 0);
+    // efecto de correr en un equipo WorldTour o Continental Profesional (calendario, invitaciones): lo que los
+    // corredores de cada categoría sacan por encima o por debajo de lo que dan sus atributos, por separado
+    // para jóvenes y resto (los CP corren además las carreras sub-23)
+    const eff = {}, cnt = {};
+    train.forEach((o, i) => { if (!o.div) return; const g = o.div + (o.J ? 'J' : ''); eff[g] = (eff[g] || 0) + (y[i] - oof[i]); cnt[g] = (cnt[g] || 0) + 1; });
+    for (const g in eff) eff[g] /= cnt[g];
+    // efecto medio de la categoría según el modelo: el mismo corredor en un WT frente a un CP
+    let wtv = 0, cpv = 0;
+    for (const o of train) { const x = feats(o), n = x.length - 1; const a1 = x.slice(), a0 = x.slice(); a1[n] = 1; a0[n] = 0; wtv += Math.expm1(models.reduce((s, m) => s + m.predict(a1), 0) / K); cpv += Math.expm1(models.reduce((s, m) => s + m.predict(a0), 0) / K); }
+    const wtRatio = cpv ? wtv / cpv : 1;
+    const E = (d, J) => (d ? eff[d + (J ? 'J' : '')] ?? eff[d] ?? 0 : 0);
+    // días por corredor según la categoría (los WT corren más)
+    const md = {}, mn = {};
+    for (const o of A) if (o.div && o.days > 0) { md[o.div] = (md[o.div] || 0) + o.days; mn[o.div] = (mn[o.div] || 0) + 1; }
+    for (const d in md) md[d] /= mn[d];
     // próxima temporada
     const prev = new Map(A.map(o => [o.id, o]));
     const act = B.filter(o => !OUT.test(o.team));
@@ -110,9 +145,15 @@
       const f = foldOf.get(o.id), x = feats(o);
       const base = f ? models[f.k].predict(x) : models.reduce((a, m) => a + m.predict(x), 0) / K;
       const a = f ? 0.1 + 0.4 * Math.min(1, Math.max(0, (f.y - 8.5) / 2)) : 0;
-      o.p85 = Math.expm1(base + (f ? a * f.res : 0)) * cal;
+      // lo propio del corredor (residuo) se mide sin el efecto de la categoría en la que corrió, y se aplica el de la nueva
+      const d0 = p ? p.div : null, d1 = o.div;
+      const own = f ? f.res - E(d0, p && p.J) : 0;
+      o.p85 = Math.expm1(base + a * own + E(d1, o.J)) * cal;
       o.y85 = o.J ? Math.max(0, Math.expm1(ym.predict(feats(o)))) : 0;
-      o.edays = p && p.days >= 40 ? Math.min(85, p.days) : 80; // días que correrá (como este año)
+      // días que correrá: como este año; si su equipo cambia de categoría, en proporción a lo que corren en la nueva
+      let ed = p && p.days >= 40 ? Math.min(85, p.days) : (md[d1] || 80);
+      if (d0 && d1 && d0 !== d1 && md[d0] && md[d1]) ed = Math.max(40, Math.min(85, ed * md[d1] / md[d0]));
+      o.edays = Math.round(ed);
       o.prev = p;
     }
     // reparto: los que siguen se reparten los mismos puntos que sumaron este año
@@ -131,9 +172,10 @@
       year: opts.year, from: opts.from,
       quality: { n: train.length, r2: Math.round(r2 * 1000) / 1000, corr: Math.round(corr(ex.map(v => v * cal), ac) * 1000) / 1000, teamCorr: Math.round(teamCorr * 1000) / 1000 },
       riders: act.sort((a, b) => b.pred - a.pred).map(o => [o.id, o.name, o.team, o.med, o.prev ? o.prev.med : null, o.J ? 1 : 0, o.age, o.prev ? o.prev.team : null, o.prev ? o.prev.pts : 0, o.prev ? o.prev.days : 0, Math.round(o.pred), Math.round(o.pred85), Math.round(o.yp), o.edays, o.trank]),
-      teams: [...teams.values()].sort((a, b) => b.total - a.total).map(t => [t.team, t.n, Math.round(t.riders), Math.round(t.tc), Math.round(t.total)])
+      teams: [...teams.values()].sort((a, b) => b.total - a.total).map(t => [t.team, t.n, Math.round(t.riders), Math.round(t.tc), Math.round(t.total), look(DV && DV.next, t.team) || '', look(DV && DV.cur, t.team) || '']),
+      div: DV ? { up: DV.up, down: DV.down, wtRatio: Math.round(wtRatio * 1000) / 1000, effect: Object.fromEntries(Object.entries(eff).map(([g, v]) => [g, Math.round(Math.expm1(v) * 1000) / 1000])), days: Object.fromEntries(Object.entries(md).map(([g, v]) => [g, Math.round(v * 10) / 10])) } : null
     };
   }
 
-  G.MCPredict = { run, fitGBM, ATTR };
+  G.MCPredict = { run, fitGBM, ATTR, divisionsNext };
 })(typeof window !== 'undefined' ? window : globalThis);
