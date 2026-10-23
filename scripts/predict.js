@@ -85,6 +85,12 @@
 
   function run(cur, next, youth, teamClass, opts = {}) {
     const A = riders(cur), B = riders(next);
+    // Jóvenes (J): hasta una edad máxima (la de los J de esta temporada, 25). Las plantillas de la próxima temporada
+    // copian la marca (J) de esta, así que se recalcula con la edad que tendrán: los que pasan de ella dejan de ser J.
+    const jAges = A.filter(o => o.J && o.age).map(o => o.age);
+    const jMax = jAges.length ? Math.max(...jAges) : 25;
+    let lostJ = 0;
+    for (const o of B) if (o.age) { const j = o.age <= jMax; if (o.J && !j) lostJ++; o.J = j; }
     context(A); context(B);
     // categoría de cada equipo esta temporada y la próxima (si se conoce)
     const DV = opts.rank ? divisionsNext(opts.rank) : null;
@@ -169,7 +175,7 @@
     const totR = [...teams.values()].reduce((a, t) => a + t.riders, 0);
     for (const t of teams.values()) { t.tc = teamClass * t.riders / totR; t.total = t.riders + t.tc; t.top.sort((a, b) => b.pred - a.pred); }
     return {
-      year: opts.year, from: opts.from,
+      year: opts.year, from: opts.from, jMax, lostJ,
       quality: { n: train.length, r2: Math.round(r2 * 1000) / 1000, corr: Math.round(corr(ex.map(v => v * cal), ac) * 1000) / 1000, teamCorr: Math.round(teamCorr * 1000) / 1000 },
       riders: act.sort((a, b) => b.pred - a.pred).map(o => [o.id, o.name, o.team, o.med, o.prev ? o.prev.med : null, o.J ? 1 : 0, o.age, o.prev ? o.prev.team : null, o.prev ? o.prev.pts : 0, o.prev ? o.prev.days : 0, Math.round(o.pred), Math.round(o.pred85), Math.round(o.yp), o.edays, o.trank]),
       teams: [...teams.values()].sort((a, b) => b.total - a.total).map(t => [t.team, t.n, Math.round(t.riders), Math.round(t.tc), Math.round(t.total), look(DV && DV.next, t.team) || '', look(DV && DV.cur, t.team) || '']),
