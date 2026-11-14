@@ -189,6 +189,8 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
 .t-compact td { padding: 5px 6px; }
 .t-res td.v { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .t-res td.team, .t-rank td.team { color: var(--muted); }
+.t-rank td:has(> details.mk-d) { min-width: 230px; }
+.t-rank details.mk-d summary { white-space: nowrap; }
 .t td.rider { white-space: nowrap; }
 .pos { display: inline-block; min-width: 26px; text-align: center; font-family: var(--f-display); font-weight: 700; font-size: 17px; }
 .pos.p1 { color: #1a1300; background: var(--gc); border-radius: 4px; }
@@ -2641,7 +2643,7 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
     const rows = list.slice(0, lim).map((r, i) => {
       const dm = r[4] != null ? r[3] - r[4] : 0, dp = r[10] - r[8];
       return `<tr><td class="n">${i + 1}</td><td class="rider">${rl(r[0], r[1])}${r[5] ? '<span class="jb" title="Sigue siendo joven en ' + P.year + '">J</span>' : /\(J\)/.test(r[1]) ? `<span class="nj" title="Cumple ${(P.jMax || 25) + 1} años: en ${P.year} ya no es joven ni suma la clasificación de jóvenes">ya no J</span>` : ''}</td><td class="team">${esc(r[2])}${dvB(div27.get(r[2]))}${r[7] && r[7] !== r[2] ? `<div class="sub muted small">antes ${esc(r[7])}</div>` : ''}</td><td class="n">${r[6] || ''}</td>
-        ${aCells(r)}<td class="n">${ay ? chip(ay == P.year ? r[3] : r[4], 'MED') : fmtN(r[3])} ${dm && ay != P.from ? `<span class="${dm > 0 ? 'up' : 'down'} small">${dm > 0 ? '+' : ''}${fmtN(dm)}</span>` : ''}</td><td class="n muted">${fmtN(r[8])} <small>(${r[9]} d)</small></td><td class="n strong">${fmtN(r[10])}${r[12] ? `<div class="sub muted small">${fmtN(r[12])} de jóvenes</div>` : ''}</td><td class="n ${dp > 0 ? 'up' : 'down'}">${dp > 0 ? '+' : ''}${fmtN(dp)}</td></tr>`;
+        ${aCells(r)}<td class="n">${ay ? chip(ay == P.year ? r[3] : r[4], 'MED') : fmtN(r[3])} ${dm && ay != P.from ? `<span class="${dm > 0 ? 'up' : 'down'} small">${dm > 0 ? '+' : ''}${fmtN(dm)}</span>` : ''}</td><td class="n muted">${fmtN(Math.round(r[8]))} <small>(${r[9]} d)</small></td><td class="n strong">${fmtN(r[10])}${r[12] ? `<div class="sub muted small">${fmtN(r[12])} de jóvenes</div>` : ''}</td><td class="n ${dp > 0 ? 'up' : 'down'}">${dp > 0 ? '+' : ''}${fmtN(Math.round(dp))}</td></tr>`;
     }).join('');
     const note = view === 'jo' ? `Corredores que seguirán siendo jóvenes (J) en ${P.year} (${P.jMax || 25} años o menos): además de lo que da su media, suman la clasificación de jóvenes de cada carrera.${P.lostJ ? ` ${P.lostJ} jóvenes de ${P.from} cumplen ${(P.jMax || 25) + 1} y dejan de serlo: pierden esos puntos y ya no se comparan con jóvenes.` : ''}` : view === 'su' ? `Los que más puntos ganarían respecto a ${P.from}: suben mucho de media, cambian a un equipo donde tendrán más galones o el año pasado corrieron pocos días.` : `Todos los corredores con equipo en ${P.year}, ordenados por los puntos estimados. Se supone que corren los mismos días que en ${P.from} (80 si corrieron poco).`;
     return `${head}${seg}<p class="muted small">${note}</p><div class="toolbar">${aSeg}<div class="filter"><input id="tfilter" type="search" placeholder="Buscar corredor o equipo" aria-label="Filtrar"></div></div>
