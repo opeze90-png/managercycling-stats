@@ -54,7 +54,10 @@
   const ATTR = ['LLA', 'MON', 'MM', 'COL', 'CRI', 'PRL', 'PAV', 'SPR', 'ACE', 'DES', 'COM', 'ENE', 'RES', 'REC'];
   const OUT = /^(retirados|sancionados|agentes libres)$/i;
   function riders(rows) {
-    return rows.map(r => ({ id: r[0], name: r[1], team: r[2], age: r[3], days: r[4] || 0, pts: r[5] || 0, att: r.slice(7, 21), med: r[21], J: /\(J\)/.test(r[1]) })).filter(o => o.med != null && o.att.every(v => v != null));
+    // la web oficial marca a los jóvenes con "(J)" o, desde noviembre de 2026, con una "J" suelta al final del nombre
+    const isJ = n => /\(J\)|\sJ$/.test(String(n || ''));
+    const clean = n => String(n || '').replace(/\s+J$/, ' (J)');
+    return rows.map(r => ({ id: r[0], name: clean(r[1]), team: r[2], age: r[3], days: r[4] || 0, pts: r[5] || 0, att: r.slice(7, 21), med: r[21], J: isJ(r[1]) })).filter(o => o.med != null && o.att.every(v => v != null));
   }
   // papel en el equipo: puesto por media dentro de la plantilla, media de sus 8 mejores y distancia al líder
   function context(list) {
