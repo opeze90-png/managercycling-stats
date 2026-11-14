@@ -398,8 +398,10 @@
         offSeasons.add(season); curSeason = season;
         data.races = data.races.filter(r => r.s !== season); // lo del foro de esa temporada no se usa
         // nombre de cada equipo oficial: el de su última prueba (los cambios de nombre siguen siendo un equipo)
+        // (en Mundiales y JJOO las filas llevan la selección, no el equipo: ni dan nombre ni suman al equipo)
+        const natEv = ev => /^(WC|OG)\./.test(((off.meta || {})[ev.e] || [])[1] || '') || /world championships|olympic|mundial/i.test(ev.n);
         const tName = new Map();
-        for (const ev of off.events) for (const x of ev.rows) if (x[4] != null && x[5]) tName.set(x[4], x[5]);
+        for (const ev of off.events) if (!natEv(ev)) for (const x of ev.rows) if (x[4] != null && x[5]) tName.set(x[4], x[5]);
         const tOf = new Map();
         const T = t => { if (t == null) return -1; if (!tOf.has(t)) { const n = tName.get(t), id = tid(n); if (id >= 0 && n) { data.teams[id] = n; teamId.set(MC.teamKey(n), id); } tOf.set(t, id); } return tOf.get(t); };
         const claimed = new Set(ridOfOid.values());
@@ -424,6 +426,10 @@
         const fw = n => MC.riderKey(n).split(' ')[0];
         let lastDate = null;
         for (const ev of off.events) {
+          const nat = natEv(ev);
+          // pruebas guardadas sin días por fila: 1 día por clásica/etapa disputada (también si abandona), 0 en líder y generales
+          const noDays = !ev.rows.some(x => x[7]);
+          const dayOf = x => noDays ? (/^(Clásica|Etapa\s*\d+)/.test(x[0]) && !/^l[ií]der$/i.test(String(x[1])) ? 1 : 0) : x[7];
           const m = (off.meta || {})[ev.e] || [];
           const start = m[0] || lastDate; if (m[0]) lastDate = m[0];
           const fl = String(m[2] || '').toLowerCase();
@@ -433,8 +439,8 @@
           const stages = new Map(), ld = {};
           for (const x of ev.rows) {
             const [c, p, oid, name, t, , pts, days, time, prof] = x;
-            const r = oid != null ? R(oid, name) : -1, tt = T(t);
-            if (r >= 0 && days) o.dy[r] = (o.dy[r] || 0) + days;
+            const r = oid != null ? R(oid, name) : -1, tt = nat ? -1 : T(t);
+            if (r >= 0 && dayOf(x) && !nat) o.dy[r] = (o.dy[r] || 0) + dayOf(x);
             const num = typeof p === 'number' ? p : /^\d+$/.test(String(p)) ? +p : null;
             if (/^(Clásica|Etapa\s*\d+)/.test(c)) {
               const n = c === 'Clásica' ? 0 : +c.match(/\d+/)[0];

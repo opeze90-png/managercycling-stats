@@ -68,9 +68,9 @@ function readOfficial(y) {
   const dir = offDir(y), ixf = path.join(dir, 'index.json');
   if (!fs.existsSync(ixf)) return null;
   const ix = JSON.parse(fs.readFileSync(ixf, 'utf8'));
-  ix.events = ix.events.map(([e, n, type, category]) => {
+  ix.events = ix.events.map(([e, n, type, category, , sig]) => {
     const f = path.join(dir, `e-${e}.json.gz`);
-    return { e, n, type, category, rows: fs.existsSync(f) ? JSON.parse(gzRead(f)) : [] };
+    return { e, n, type, category, sig, rows: fs.existsSync(f) ? JSON.parse(gzRead(f)) : [] };
   });
   return ix;
 }
@@ -78,7 +78,7 @@ function readOfficial(y) {
 async function fetchOfficial(season) {
   const get = async u => { const r = await fetch(OFFICIAL + u, { headers: { 'user-agent': 'managercycling-stats' }, signal: AbortSignal.timeout(90000) }); if (!r.ok) throw new Error(u + ' ' + r.status); return r.text(); };
   const prev = readOfficial(season);
-  const res = await MCOfficial.fetchSeason({ base: OFFICIAL, season, get, getJSON: async u => JSON.parse(await get(u)), meta: prev ? prev.meta : {}, log: m => console.log('  ' + m) });
+  const res = await MCOfficial.fetchSeason({ base: OFFICIAL, season, get, getJSON: async u => JSON.parse(await get(u)), meta: prev ? prev.meta : {}, prev: new Map((prev ? prev.events : []).map(e => [e.e, e])), log: m => console.log('  ' + m) });
   if (res.events.length < 1 || res.events.reduce((a, e) => a + e.rows.length, 0) < 100) throw new Error('la web oficial no trae resultados');
   const dir = offDir(season); fs.mkdirSync(dir, { recursive: true });
   let changed = 0;
@@ -90,7 +90,7 @@ async function fetchOfficial(season) {
     gzWrite(f, s); changed++;
   }
   for (const f of fs.readdirSync(dir)) if (/^e-\d+\.json\.gz$/.test(f) && !keep.has(f)) { fs.unlinkSync(path.join(dir, f)); changed++; }
-  const ix = { season, src: res.src, sourceDate: res.sourceDate, events: res.events.map(e => [e.e, e.n, e.type, e.category, e.rows.length]), meta: res.meta, rank: res.rank };
+  const ix = { season, src: res.src, sourceDate: res.sourceDate, events: res.events.map(e => [e.e, e.n, e.type, e.category, e.rows.length, e.sig || null]), meta: res.meta, rank: res.rank };
   const ixf = path.join(dir, 'index.json');
   const old = fs.existsSync(ixf) ? JSON.parse(fs.readFileSync(ixf, 'utf8')) : null;
   if (changed || !old || JSON.stringify({ ...old, at: null }) !== JSON.stringify({ ...ix, at: null })) {
@@ -157,7 +157,7 @@ function checkOfficial(data, off) {
     const o = tot.riders.get(byOid.get(oid)) || { pts: 0, days: 0 };
     if (Math.abs(o.pts - pts) > 0.01 || o.days !== days) { bad++; if (ex.length < 5) ex.push(`${name} ${o.pts}/${pts} pts ${o.days}/${days} días`); }
   }
-  const tName = new Map(); for (const ev of off.events) for (const x of ev.rows) if (x[4] != null && x[5]) tName.set(x[4], x[5]);
+  const tName = new Map(); for (const ev of off.events) if (!/^(WC|OG)\./.test(((off.meta || {})[ev.e] || [])[1] || '')) for (const x of ev.rows) if (x[4] != null && x[5]) tName.set(x[4], x[5]);
   let tbad = 0;
   for (const [tid, name, pts] of off.rank.teams) { const id = data.teams.findIndex(t => MC.teamKey(t) === MC.teamKey(tName.get(tid) || name)); const v = tot.teams.get(id) || 0; if (Math.abs(v - pts) > 0.5) { tbad++; if (ex.length < 8) ex.push(`${name} ${v}/${pts}`); } }
   console.log(`Comprobación ${off.season} con la clasificación oficial: ${off.rank.riders.length - bad}/${off.rank.riders.length} corredores y ${off.rank.teams.length - tbad}/${off.rank.teams.length} equipos cuadran${ex.length ? ' · ' + ex.join(' · ') : ''}.`);

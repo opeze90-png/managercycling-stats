@@ -26,7 +26,12 @@
   }
 
   // ROW = [clasificación, puesto, idCorredor, nombre, idEquipo, equipo, puntos, días, tiempo, perfil]
-  const toRow = x => [x.c, x.p, x.r == null ? null : x.r, x.x == null ? null : x.x, x.t, x.m, +x.s || 0, +x.days || 0, typeof x.time === 'string' ? x.time : '', x.profile && x.profile !== '-' ? x.profile : ''];
+  // días: si la fila no los trae (formato desde 10/2026), 1 por cada clásica o etapa disputada (también abandonos),
+  // 0 en las filas de líder y en las clasificaciones finales; es exactamente como los cuenta la oficial
+  const daysOf = x => x.days != null ? +x.days || 0 : (/^(Clásica|Etapa\s*\d+)/.test(x.c) && !/^l[ií]der$/i.test(String(x.p)) ? 1 : 0);
+  const toRow = x => [x.c, x.p, x.r == null ? null : x.r, x.x == null ? null : x.x, x.t, x.m, +x.s || 0, daysOf(x), typeof x.time === 'string' ? x.time : '', x.profile && x.profile !== '-' ? x.profile : ''];
+  // huella de una prueba en la lista de la web: si no cambia, sus filas tampoco
+  const sigOf = e => JSON.stringify([e.count, (e.classifications || []).map(c => [c.name, c.count, c.statuses, c.minPosition, c.maxPosition])]);
 
   // opts: { base, season, get(path) → texto, getJSON(path) → objeto, meta: {idPrueba: [fecha, tipo, bandera, país]}, log }
   async function fetchSeason(opts) {
@@ -39,18 +44,51 @@
     if (!events || !events.length) throw new Error('la página de resultados no trae pruebas');
     const sourceDate = (t.match(/"sourceDate":"([^"]+)"/) || [])[1] || null;
     const byE = new Map();
-    const fresh = new Set(overlay.map(o => o.event_id));
-    for (const g of groups) {
-      const j = await opts.getJSON(g.file);
-      for (const x of j.rows || []) if (!fresh.has(x.e)) { if (!byE.has(x.e)) byE.set(x.e, []); byE.get(x.e).push(x); }
-    }
-    for (const o of overlay) byE.set(o.event_id, (o.rows || []).slice());
     const out = [];
-    for (const e of events) {
-      const rows = (byE.get(e.eventId) || []).sort((a, b) => a.i - b.i);
-      if (!rows.length) continue;
-      const k = rows.find(x => x.category != null && x.category !== '') || rows[0];
-      out.push({ e: e.eventId, n: e.event, type: String(k.type ?? ''), category: k.category == null ? '' : String(k.category), rows: rows.map(toRow) });
+    if (groups.length || overlay.length) {
+      // formato antiguo: archivos por grupos de pruebas + las últimas dentro de la página
+      const fresh = new Set(overlay.map(o => o.event_id));
+      for (const g of groups) {
+        const j = await opts.getJSON(g.file);
+        for (const x of j.rows || []) if (!fresh.has(x.e)) { if (!byE.has(x.e)) byE.set(x.e, []); byE.get(x.e).push(x); }
+      }
+      for (const o of overlay) byE.set(o.event_id, (o.rows || []).slice());
+      for (const e of events) {
+        const rows = (byE.get(e.eventId) || []).sort((a, b) => a.i - b.i);
+        if (!rows.length) continue;
+        const k = rows.find(x => x.category != null && x.category !== '') || rows[0];
+        out.push({ e: e.eventId, n: e.event, sig: sigOf(e), type: String(k.type ?? ''), category: k.category == null ? '' : String(k.category), rows: rows.map(toRow) });
+      }
+    } else {
+      // formato actual: cada prueba en su página (/resultados?prueba=N). Solo se descargan las nuevas o cambiadas,
+      // las últimas (pueden estar en curso) y unas cuantas más por turno para repasarlas todas cada poco
+      const prev = opts.prev || new Map();
+      const ids = events.map(e => e.eventId);
+      const recent = new Set(ids.slice(-(opts.recent || 12)));
+      const rot = opts.rotate || 25, start = Math.floor(Date.now() / 600000) * rot % Math.max(1, ids.length);
+      const sweep = new Set(Array.from({ length: Math.min(rot, ids.length) }, (_, i) => ids[(start + i) % ids.length]));
+      let fetched = 0;
+      for (const e of events) {
+        const p = prev.get(e.eventId), sig = sigOf(e);
+        let rows = null;
+        if (!p || p.sig !== sig || recent.has(e.eventId) || sweep.has(e.eventId) || !p.rows.length) {
+          try {
+            const page = unescape(await opts.get(`/resultados?${opts.season ? `temporada=${opts.season}&` : ''}prueba=${e.eventId}`));
+            const raw = jsonAfter(page, 'rows', `"e":${e.eventId},`);
+            if (raw && raw.length) {
+              rows = raw.filter(x => x.e === e.eventId).sort((a, b) => a.i - b.i).map(toRow); fetched++;
+              // la web ya no da los días por fila: se conservan los ya guardados; los mundiales/JJOO (selecciones) no suman días
+              const nat = /world championships|olympic|mundial/i.test(e.event);
+              const kd = new Map(p ? p.rows.map(x => [x[0] + '|' + x[2] + '|' + x[1], x[7]]) : []);
+              for (const x of rows) { const k = x[0] + '|' + x[2] + '|' + x[1]; x[7] = kd.has(k) ? kd.get(k) : nat ? 0 : x[7]; }
+            }
+          } catch (err) { log(`Prueba ${e.eventId}: ${err.message}`); }
+        }
+        if (!rows && p) rows = p.rows; // sin cambios o fallo puntual: se mantiene lo guardado
+        if (!rows || !rows.length) continue;
+        out.push({ e: e.eventId, n: e.event, sig, type: p ? p.type || '' : '', category: p ? p.category || '' : '', rows });
+      }
+      log(`${fetched} pruebas leídas de la web oficial (de ${events.length}).`);
     }
     // clasificaciones generales publicadas (para comprobar que los totales cuadran)
     let rank = null;
