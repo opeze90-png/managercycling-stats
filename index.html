@@ -189,6 +189,9 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
 .t-compact td { padding: 5px 6px; }
 .t-res td.v { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .t-res td.team, .t-rank td.team { color: var(--muted); }
+.t-rank td.team { white-space: nowrap; }
+.t-rank td.ac { text-align: center; padding-left: 2px; padding-right: 2px; vertical-align: middle; white-space: nowrap; }
+.t-rank td.ac .ad { display: block; height: 14px; line-height: 14px; font-size: 11px; margin-top: 2px; }
 .t-rank td:has(> details.mk-d) { min-width: 230px; }
 .t-rank details.mk-d summary { white-space: nowrap; }
 .t td.rider { white-space: nowrap; }
@@ -2637,7 +2640,7 @@ a.rl:hover, a.tl:hover, a.el:hover { color: var(--accent); }
     // atributos como en la web oficial: los de la próxima temporada o los de esta
     const ay = state.predAttr || '';
     const AK = D.attrs ? D.attrs.keys.slice(0, 14) : [];
-    const aCells = r => { if (!ay) return ''; const a = attrsOf(r[0], ay), b = ay == P.year ? attrsOf(r[0], P.from) : null; return AK.map((k, i) => { const v = a ? a[i] : null, d = b && v != null ? v - b[i] : 0; return `<td class="n">${chip(v, k)}${d ? `<div class="sub small ${d > 0 ? 'up' : 'down'}">${d > 0 ? '+' : ''}${d}</div>` : ''}</td>`; }).join(''); };
+    const aCells = r => { if (!ay) return ''; const a = attrsOf(r[0], ay), b = ay == P.year ? attrsOf(r[0], P.from) : null; return AK.map((k, i) => { const v = a ? a[i] : null, d = b && v != null ? v - b[i] : 0; return `<td class="n ac">${chip(v, k)}${b ? `<div class="ad small ${d > 0 ? 'up' : d < 0 ? 'down' : ''}">${d ? (d > 0 ? '+' : '') + d : '&nbsp;'}</div>` : ''}</td>`; }).join(''); };
     const aHead = ay ? AK.map(k => `<th class="n" title="${ATTR_NAME[k]}">${k}</th>`).join('') : '';
     const aSeg = D.attrs ? `<div class="seg"><a href="#prediccion" data-pattr="" class="${!ay ? 'on' : ''}">Sin atributos</a><a href="#prediccion" data-pattr="${P.from}" class="${ay == P.from ? 'on' : ''}">Atributos ${P.from}</a><a href="#prediccion" data-pattr="${P.year}" class="${ay == P.year ? 'on' : ''}">Atributos ${P.year}</a></div>` : '';
     const rows = list.slice(0, lim).map((r, i) => {
